@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claudio"
+version = "0.1.0"
+description = "IO wrapper that gives a Claude Code session an inbox"
+requires-python = ">=3.9"
+dependencies = []
