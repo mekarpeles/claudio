@@ -46,46 +46,71 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> s
     return socket_path(target, state_dir)
 
 
-def cmd_pair(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+def cmd_pair_approve(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
     """
-    claudio pair <socket>              — initiate pairing
-    claudio pair --approve <name>      — approve a pending pair request
+    claudio pair --approve <name>  — approve a pending pair request from <name>.
+
+    Sends a pair_approve message to the caller's own running daemon and returns
+    immediately.  Does NOT block.
     """
     state_dir = state_dir or _state_dir()
     agent_name = agent_name or _agent_name()
 
+    # args may be ['--approve', '<name>'] or just ['<name>'] depending on caller;
+    # normalise: strip a leading '--approve' flag if present.
     if args and args[0] == '--approve':
-        if len(args) < 2:
-            print("usage: claudio pair --approve <name>", file=sys.stderr)
-            return 1
-        remote_name = args[1]
-        if not agent_name:
-            print("claudio: CLAUDIO_AGENT_NAME or CMUX_SESSION_NAME must be set", file=sys.stderr)
-            return 1
-        own_sock = socket_path(agent_name, state_dir)
-        try:
-            resp = send_to(own_sock, {'_claudio': 'pair_approve', 'name': remote_name})
-        except Exception as e:
-            print(f"claudio: failed to contact own daemon: {e}", file=sys.stderr)
-            return 1
-        if resp.get('ok'):
-            print(f"claudio: paired with {remote_name}")
-            return 0
-        else:
-            print(f"claudio: pair approve failed: {resp.get('error', 'unknown error')}", file=sys.stderr)
-            return 1
+        args = args[1:]
 
-    # Initiate pairing
     if not args:
-        print("usage: claudio pair <socket>", file=sys.stderr)
+        print("usage: claudio pair --approve <name>", file=sys.stderr)
         return 1
-    target_socket = os.path.expanduser(args[0])
+    remote_name = args[0]
+
     if not agent_name:
         print("claudio: CLAUDIO_AGENT_NAME or CMUX_SESSION_NAME must be set", file=sys.stderr)
         return 1
+
+    own_sock = socket_path(agent_name, state_dir)
+    try:
+        resp = send_to(own_sock, {'_claudio': 'pair_approve', 'name': remote_name})
+    except Exception as e:
+        print(f"claudio: failed to contact own daemon: {e}", file=sys.stderr)
+        return 1
+
+    if resp.get('ok'):
+        print(f"claudio: paired with {remote_name}")
+        return 0
+    else:
+        print(f"claudio: pair approve failed: {resp.get('error', 'unknown error')}", file=sys.stderr)
+        return 1
+
+
+def cmd_pair_initiate(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+    """
+    claudio pair <socket>  — initiate pairing with a remote agent.
+
+    Opens a direct socket connection to <socket>, sends a pair_request, then
+    blocks for up to 5 minutes waiting for the remote agent to approve.  On
+    success, records the remote agent in the local peers file.
+    """
+    import json
+    import socket as _socket
+
+    state_dir = state_dir or _state_dir()
+    agent_name = agent_name or _agent_name()
+
+    if not args:
+        print("usage: claudio pair <socket>", file=sys.stderr)
+        return 1
+
+    target_socket = os.path.expanduser(args[0])
+
+    if not agent_name:
+        print("claudio: CLAUDIO_AGENT_NAME or CMUX_SESSION_NAME must be set", file=sys.stderr)
+        return 1
+
     own_sock = socket_path(agent_name, state_dir)
 
-    import socket as _socket
     s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
     try:
         s.connect(target_socket)
@@ -94,7 +119,6 @@ def cmd_pair(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
         return 1
 
     msg = {'_claudio': 'pair_request', 'name': agent_name, 'socket': own_sock}
-    import json
     s.sendall(json.dumps(msg).encode())
     s.settimeout(300)  # 5-minute timeout
     try:
@@ -122,6 +146,18 @@ def cmd_pair(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
     else:
         print(f"claudio: pair failed: {resp.get('error', 'unknown error')}", file=sys.stderr)
         return 1
+
+
+def cmd_pair(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+    """
+    claudio pair <socket>              — initiate pairing
+    claudio pair --approve <name>      — approve a pending pair request
+
+    Thin dispatcher: routes to cmd_pair_approve or cmd_pair_initiate.
+    """
+    if args and args[0] == '--approve':
+        return cmd_pair_approve(args, state_dir=state_dir, agent_name=agent_name)
+    return cmd_pair_initiate(args, state_dir=state_dir, agent_name=agent_name)
 
 
 def cmd_peers(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
