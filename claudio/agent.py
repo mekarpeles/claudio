@@ -14,7 +14,9 @@ from collections import deque
 from typing import Callable
 
 POLL_INTERVAL = 0.5  # seconds between idle checks
-DEFAULT_STATE_DIR = os.path.expanduser('~/.claudio')
+# Project-local default: .claudio/ in the current working directory.
+# Override with CLAUDIO_STATE_DIR env var or pass state_dir= explicitly.
+DEFAULT_STATE_DIR = os.path.abspath('.claudio')
 
 
 def socket_path(name: str, state_dir: str = DEFAULT_STATE_DIR) -> str:
