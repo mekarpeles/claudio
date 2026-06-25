@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>claudio — let your AI agents talk to each other</title>
-<meta name="description" content="claudio gives each Claude Code session a Unix-socket inbox. Agents can pair, exchange messages, and coordinate — peer-to-peer, no server, no polling." />
+<title>claudio — Battery Pack for Claude Code</title>
+<meta name="description" content="claudio gives every Claude Code session a persistent inbox, a peer address, and a team. The missing coordination layer for AI agents." />
 <meta name="theme-color" content="#0d1117" />
 
 <!-- Open Graph -->
 <meta property="og:type" content="website" />
-<meta property="og:title" content="claudio — let your AI agents talk to each other" />
-<meta property="og:description" content="A messaging primitive for AI agents. Each Claude Code session gets a socket inbox. Peer-to-peer, no server, no polling." />
+<meta property="og:title" content="claudio — Battery Pack for Claude Code" />
+<meta property="og:description" content="claudio gives every Claude Code session a persistent inbox, a peer address, and a team. The missing coordination layer." />
 <meta property="og:url" content="https://getclaudio.com" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -83,18 +83,21 @@
   .brand {
     font-family: var(--mono);
     font-weight: 700;
-    font-size: 1.15rem;
+    font-size: 1.25rem;
     letter-spacing: -0.02em;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 9px;
+    color: var(--text);
   }
+  .brand .nav-logo { height: 24px; width: auto; display: block; }
   .brand .dot {
     width: 9px; height: 9px;
     border-radius: 50%;
     background: var(--green);
     box-shadow: 0 0 10px var(--green-glow);
   }
+  .brand .bolt { color: var(--green-soft); font-size: 0.95em; }
   .nav-links { display: flex; gap: 26px; align-items: center; }
   .nav-links a { color: var(--muted); font-size: 0.92rem; font-weight: 500; }
   .nav-links a:hover { color: var(--text); text-decoration: none; }
@@ -102,7 +105,38 @@
   /* ---------- hero ---------- */
   .hero {
     text-align: center;
-    padding: 64px 0 40px;
+    padding: 56px 0 40px;
+  }
+  .hero-logo {
+    height: 96px;
+    width: auto;
+    margin: 0 auto 22px;
+    display: block;
+    filter: drop-shadow(0 0 28px var(--green-glow));
+  }
+  /* text logotype fallback — also the proud brand wordmark */
+  .logotype {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(3rem, 11vw, 6rem);
+    letter-spacing: -0.04em;
+    line-height: 1;
+    margin: 0 auto 26px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.06em;
+    background: linear-gradient(180deg, #ffffff 0%, #8be59a 130%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 60px var(--green-glow);
+  }
+  .logotype .bracket { color: var(--green); -webkit-text-fill-color: var(--green); opacity: 0.55; }
+  .logotype .bolt {
+    -webkit-text-fill-color: var(--green-soft);
+    color: var(--green-soft);
+    font-size: 0.6em;
+    filter: drop-shadow(0 0 14px var(--green-glow));
   }
   .badge {
     display: inline-flex;
@@ -417,7 +451,7 @@
 <body>
 <div class="wrap">
   <nav>
-    <div class="brand"><span class="dot"></span>claudio</div>
+    <div class="brand"><span class="bolt">⚡</span>claudio</div>
     <div class="nav-links">
       <a href="#demo">Demo</a>
       <a href="#cmux">cmux</a>
@@ -430,12 +464,17 @@
 <!-- ===================== HERO ===================== -->
 <div class="wrap">
   <header class="hero">
-    <span class="badge"><span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;box-shadow:0 0 8px var(--green-glow)"></span>open-source messaging primitive for AI agents</span>
-    <h1>Let your AI agents<br />talk to each other.</h1>
+    <!-- Proud brand: text logotype (logo.png swaps in automatically if present) -->
+    <div class="logotype" id="hero-logo">
+      <span class="bracket">[</span>claudio<span class="bracket">]</span>&nbsp;<span class="bolt">⚡</span>
+    </div>
+
+    <span class="badge"><span class="bolt" style="font-size:0.9em">⚡</span>open source · MIT · works with Claude Code</span>
+    <h1>Battery Pack for<br />Claude Code.</h1>
     <p class="sub">
-      <strong>claudio</strong> gives each Claude Code session a message inbox.
-      Agents can pair, exchange messages, and coordinate —
-      without a server, without polling, without cmux.
+      <strong>claudio</strong> gives every Claude Code session a persistent inbox,
+      a peer address, and a team. Pairing, messaging, persistence, and idle nudges —
+      the missing <strong>coordination layer</strong> for your agents.
     </p>
 
     <div class="install">
@@ -461,7 +500,7 @@
     <div class="section-head">
       <div class="eyebrow">Live demo</div>
       <h2>Pairing in 30 seconds</h2>
-      <p>Two agents discover each other peer-to-peer, exchange socket addresses in a blocking handshake, and start sending messages. No registry, no broker.</p>
+      <p>Two <code style="font-family:var(--mono);color:var(--green-soft)">claudio start</code> commands in the same directory just work. State lives in a project-local <code style="font-family:var(--mono);color:var(--green-soft)">.claudio/</code> — agents pair peer-to-peer and start talking. No registry, no broker, no server.</p>
     </div>
 
     <div class="demo-grid">
@@ -578,6 +617,33 @@
 </footer>
 
 <script>
+/* ---------- swap in logo.png if it ships with the page ---------- */
+(function () {
+  var img = new Image();
+  img.onload = function () {
+    if (!img.naturalWidth) return;
+    // hero: replace text logotype with the image
+    var hero = document.getElementById("hero-logo");
+    if (hero) {
+      var h = document.createElement("img");
+      h.src = "logo.png"; h.alt = "claudio";
+      h.className = "hero-logo";
+      hero.replaceWith(h);
+    }
+    // nav: prepend small logo before the wordmark
+    var brand = document.querySelector(".brand");
+    if (brand) {
+      var bolt = brand.querySelector(".bolt");
+      if (bolt) bolt.remove();
+      var n = document.createElement("img");
+      n.src = "logo.png"; n.alt = "";
+      n.className = "nav-logo";
+      brand.prepend(n);
+    }
+  };
+  img.src = "logo.png";
+})();
+
 /* ---------- copy button ---------- */
 (function () {
   var btn = document.getElementById("copy-btn");
@@ -600,19 +666,19 @@
   // type: "type" plays char-by-char; "print" appears instantly (server output).
   var P = '<span class="prompt">$ </span>';
   var steps = [
-    // start both agents
-    { pane: "a", type: "type",  html: P + 'CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio start alice' },
-    { pane: "b", type: "type",  html: P + 'CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=bob claudio start bob' },
-    { pane: "a", type: "print", html: '<span class="ok">claudio: agent \'alice\' listening at /tmp/cl/alice.sock</span>', wait: 250 },
+    // start both agents — project-local .claudio/ state by default
+    { pane: "a", type: "type",  html: P + 'claudio start alice' },
+    { pane: "b", type: "type",  html: P + 'claudio start bob' },
+    { pane: "a", type: "print", html: '<span class="ok">claudio: agent \'alice\' listening at .claudio/alice.sock</span>', wait: 250 },
     { pane: "a", type: "print", html: '<span class="dim">claudio: press Ctrl-C to stop</span>' },
-    { pane: "b", type: "print", html: '<span class="ok">claudio: agent \'bob\' listening at /tmp/cl/bob.sock</span>', wait: 250 },
+    { pane: "b", type: "print", html: '<span class="ok">claudio: agent \'bob\' listening at .claudio/bob.sock</span>', wait: 250 },
     { pane: "b", type: "print", html: '<span class="dim">claudio: press Ctrl-C to stop</span>' },
 
     // alice initiates pairing
-    { pane: "a", type: "type",  html: P + 'claudio pair /tmp/cl/bob.sock', wait: 700 },
+    { pane: "a", type: "type",  html: P + 'claudio pair .claudio/bob.sock', wait: 700 },
 
     // bob gets the pair request
-    { pane: "b", type: "print", html: '<span class="sys">[claudio]: alice at /tmp/cl/alice.sock wants to pair.</span>', wait: 600 },
+    { pane: "b", type: "print", html: '<span class="sys">[claudio]: alice wants to pair.</span>', wait: 600 },
     { pane: "b", type: "print", html: '<span class="sys">           Run: claudio pair --approve alice</span>' },
 
     // bob approves
