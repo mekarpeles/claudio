@@ -66,6 +66,50 @@ def run(
     pending_pairs: dict = {}
     peers = Peers(peers_path(name, state_dir))
 
+    def _handle_pair_request(conn: socket.socket, msg: dict) -> None:
+        remote_name = msg.get('name', '')
+        remote_socket = msg.get('socket', '')
+        # Hold the connection open; enqueue a notification
+        with lock:
+            pending_pairs[remote_name] = (conn, remote_socket)
+            queue.append({
+                'body': (
+                    f'[claudio]: {remote_name} at {remote_socket} wants to pair. '
+                    f'Run: claudio pair --approve {remote_name}'
+                )
+            })
+        # Do NOT close conn here — it stays open until approved/rejected
+
+    def _handle_pair_approve(conn: socket.socket, msg: dict) -> None:
+        approve_name = msg.get('name', '')
+        with lock:
+            pair_info = pending_pairs.pop(approve_name, None)
+        if pair_info is None:
+            conn.sendall(
+                json.dumps({'ok': False, 'error': f"no pending pair request from '{approve_name}'"}).encode()
+            )
+            conn.close()
+        else:
+            held_conn, remote_socket = pair_info
+            # Record the peer
+            peers.add(approve_name, remote_socket)
+            # Respond to alice's held connection
+            own_sock = socket_path(name, state_dir)
+            held_conn.sendall(
+                json.dumps({'ok': True, 'name': name, 'socket': own_sock}).encode()
+            )
+            held_conn.close()
+            # Respond to the approve caller
+            conn.sendall(json.dumps({'ok': True}).encode())
+            conn.close()
+
+    def _handle_message(conn: socket.socket, msg: dict) -> None:
+        # Regular message: enqueue, ack, close
+        with lock:
+            queue.append(msg)
+        conn.sendall(json.dumps({'ok': True}).encode())
+        conn.close()
+
     def handle_connection(conn: socket.socket) -> None:
         try:
             data = conn.recv(65536)
@@ -77,48 +121,11 @@ def run(
             claudio_type = msg.get('_claudio')
 
             if claudio_type == 'pair_request':
-                remote_name = msg.get('name', '')
-                remote_socket = msg.get('socket', '')
-                # Hold the connection open; enqueue a notification
-                with lock:
-                    pending_pairs[remote_name] = (conn, remote_socket)
-                    queue.append({
-                        'body': (
-                            f'[claudio]: {remote_name} at {remote_socket} wants to pair. '
-                            f'Run: claudio pair --approve {remote_name}'
-                        )
-                    })
-                # Do NOT close conn here — it stays open until approved/rejected
-
+                _handle_pair_request(conn, msg)
             elif claudio_type == 'pair_approve':
-                approve_name = msg.get('name', '')
-                with lock:
-                    pair_info = pending_pairs.pop(approve_name, None)
-                if pair_info is None:
-                    conn.sendall(
-                        json.dumps({'ok': False, 'error': f"no pending pair request from '{approve_name}'"}).encode()
-                    )
-                    conn.close()
-                else:
-                    held_conn, remote_socket = pair_info
-                    # Record the peer
-                    peers.add(approve_name, remote_socket)
-                    # Respond to alice's held connection
-                    own_sock = socket_path(name, state_dir)
-                    held_conn.sendall(
-                        json.dumps({'ok': True, 'name': name, 'socket': own_sock}).encode()
-                    )
-                    held_conn.close()
-                    # Respond to the approve caller
-                    conn.sendall(json.dumps({'ok': True}).encode())
-                    conn.close()
-
+                _handle_pair_approve(conn, msg)
             else:
-                # Regular message: enqueue, ack, close
-                with lock:
-                    queue.append(msg)
-                conn.sendall(json.dumps({'ok': True}).encode())
-                conn.close()
+                _handle_message(conn, msg)
 
         except Exception as e:
             try:
