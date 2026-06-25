@@ -166,17 +166,79 @@ def cmd_send(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
         return 1
 
 
+def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+    """claudio start [<name>] — start a daemon in the foreground, print incoming messages."""
+    import claudio as _claudio
+
+    state_dir = state_dir or _state_dir()
+    agent_name = agent_name or (args[0] if args else None) or _agent_name()
+
+    if not agent_name:
+        print("usage: claudio start <name>  (or set CLAUDIO_AGENT_NAME)", file=sys.stderr)
+        return 1
+
+    sock = socket_path(agent_name, state_dir)
+    print(f"claudio: agent '{agent_name}' listening at {sock}")
+    print(f"claudio: press Ctrl-C to stop\n")
+
+    def deliver(msg):
+        sender = msg.get('from', 'claudio')
+        body = msg.get('body', repr(msg))
+        print(f"[{sender}]: {body}")
+
+    try:
+        _claudio.run(
+            name=agent_name,
+            deliver=deliver,
+            is_idle=lambda: True,
+            state_dir=state_dir,
+        )
+    except KeyboardInterrupt:
+        print(f"\nclaudio: stopped '{agent_name}'")
+        try:
+            os.unlink(sock)
+        except FileNotFoundError:
+            pass
+        return 0
+
+
+USAGE = """\
+claudio — peer-to-peer messaging for Claude Code agents
+
+Usage:
+  claudio start <name>               Start a daemon in the foreground (Ctrl-C to stop)
+  claudio pair <socket>              Pair with the agent at <socket> (blocks until approved)
+  claudio pair --approve <name>      Approve a pending pair request from <name>
+  claudio peers                      List current peers
+  claudio send <name|socket> <msg>   Send a message to a peer
+
+Environment:
+  CLAUDIO_AGENT_NAME   This agent's name (falls back to CMUX_SESSION_NAME)
+  CLAUDIO_STATE_DIR    State directory  (falls back to CMUX_STATE_DIR, then ~/.claudio)
+
+Quick test (two terminals):
+  term1$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio start alice
+  term2$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=bob   claudio start bob
+  term1$ claudio pair /tmp/cl/bob.sock          # paste in term1 while start is running? No —
+  # open a third terminal for client commands:
+  term3$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio pair /tmp/cl/bob.sock
+  term4$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=bob   claudio pair --approve alice
+  term3$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio send bob "hello"
+"""
+
+
 def main() -> None:
     args = sys.argv[1:]
-    if not args:
-        print("usage: claudio <command> [args...]")
-        print("commands: pair, peers, send")
+    if not args or args[0] in ('-h', '--help'):
+        print(USAGE)
         sys.exit(0)
 
     cmd = args[0]
     rest = args[1:]
 
-    if cmd == 'pair':
+    if cmd == 'start':
+        sys.exit(cmd_start(rest))
+    elif cmd == 'pair':
         sys.exit(cmd_pair(rest))
     elif cmd == 'peers':
         sys.exit(cmd_peers(rest))
@@ -184,4 +246,5 @@ def main() -> None:
         sys.exit(cmd_send(rest))
     else:
         print(f"claudio: unknown command '{cmd}'", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         sys.exit(1)
