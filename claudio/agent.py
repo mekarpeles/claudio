@@ -151,6 +151,11 @@ def run(
         if not is_idle():
             continue
         with lock:
-            msg = queue.popleft()
+            try:
+                msg = queue.popleft()
+            except IndexError:
+                # Another thread drained the queue between our two lock
+                # acquisitions (TOCTOU race) — that's fine, just retry.
+                continue
         deliver(msg)
         time.sleep(1.0)

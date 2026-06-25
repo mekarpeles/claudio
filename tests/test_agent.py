@@ -94,5 +94,82 @@ class TestDelivery(unittest.TestCase):
         self.assertIn('bob', senders)
 
 
+class TestTOCTOURace(unittest.TestCase):
+    """Regression tests for the TOCTOU race in the delivery loop.
+
+    The race: the loop checks `if not queue` under the lock, releases the lock,
+    checks is_idle(), then re-acquires the lock and calls popleft().  If another
+    thread drains the queue in the window between the two lock acquisitions,
+    popleft() raises IndexError.
+
+    This test fires many concurrent senders so that the window is hit
+    repeatedly, and asserts:
+      1. No IndexError crash (the agent stays alive throughout), and
+      2. Every sent message is eventually delivered (no silent drops).
+    """
+
+    def test_no_crash_under_concurrent_senders(self):
+        """Concurrent senders must not cause IndexError / crash in delivery loop."""
+        delivered = []
+        errors = []
+        ready = threading.Event()
+
+        def deliver(msg):
+            delivered.append(msg)
+
+        # is_idle toggles rapidly to maximise the chance of hitting the race window
+        toggle = threading.Event()
+
+        def is_idle():
+            return toggle.is_set()
+
+        _run_agent('t-toctou-crash', deliver, is_idle, ready)
+
+        N = 10
+        # Send all messages while the agent is busy so they stack up in the queue
+        for i in range(N):
+            try:
+                claudio.send('t-toctou-crash', {'body': str(i)}, state_dir=STATE_DIR)
+            except Exception as e:
+                errors.append(e)
+
+        self.assertEqual(errors, [], f"send raised: {errors}")
+
+        # Now open the idle gate — the delivery loop will race to drain the queue
+        toggle.set()
+        time.sleep(N * 1.5 + 3)  # generous budget: N messages × ~1s each + overhead
+
+        self.assertEqual(
+            len(delivered), N,
+            f"Expected {N} deliveries, got {len(delivered)}: {[m['body'] for m in delivered]}",
+        )
+
+    def test_no_message_drop_under_concurrent_senders(self):
+        """All messages sent concurrently are delivered exactly once, in any order."""
+        delivered = []
+        ready = threading.Event()
+
+        _run_agent('t-toctou-drop', lambda msg: delivered.append(msg['body']), lambda: True, ready)
+
+        N = 10
+        threads = []
+        barrier = threading.Barrier(N)
+
+        def sender(i):
+            barrier.wait()  # all N threads send simultaneously
+            claudio.send('t-toctou-drop', {'body': str(i)}, state_dir=STATE_DIR)
+
+        for i in range(N):
+            t = threading.Thread(target=sender, args=(i,))
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+
+        time.sleep(N * 1.5 + 3)
+
+        self.assertEqual(sorted(delivered), [str(i) for i in range(N)])
+
+
 if __name__ == '__main__':
     unittest.main()
