@@ -23,8 +23,7 @@ def _agent_name() -> Optional[str]:
 def _state_dir() -> str:
     return (
         os.environ.get('CLAUDIO_STATE_DIR')
-        or os.environ.get('CMUX_STATE_DIR')
-        or os.path.abspath('.claudio')
+        or os.path.join(os.path.abspath(os.sep), 'tmp', 'claudio')
     )
 
 
