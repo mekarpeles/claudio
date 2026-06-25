@@ -14,9 +14,9 @@ from collections import deque
 from typing import Callable
 
 POLL_INTERVAL = 0.5  # seconds between idle checks
-# Project-local default: .claudio/ in the current working directory.
-# Override with CLAUDIO_STATE_DIR env var or pass state_dir= explicitly.
-DEFAULT_STATE_DIR = os.path.abspath('.claudio')
+# Default to /tmp/claudio — ephemeral, no cleanup needed, no project dir pollution.
+# cmux agents override this by setting CLAUDIO_STATE_DIR to their homedir.
+DEFAULT_STATE_DIR = os.path.join(os.path.abspath(os.sep), 'tmp', 'claudio')
 
 
 def socket_path(name: str, state_dir: str = DEFAULT_STATE_DIR) -> str:
