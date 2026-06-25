@@ -15,6 +15,7 @@ from typing import Callable
 
 POLL_INTERVAL = 0.5  # seconds between idle checks
 DEFAULT_STATE_DIR = os.path.expanduser('~/.claudio')
+PAIR_TIMEOUT = 300  # seconds before an unapproved pair_request is expired
 
 
 def socket_path(name: str, state_dir: str = DEFAULT_STATE_DIR) -> str:
@@ -62,7 +63,7 @@ def run(
 
     queue: deque = deque()
     lock = threading.Lock()
-    # pending_pairs: name -> (held_conn, remote_socket)
+    # pending_pairs: name -> (held_conn, remote_socket, timestamp)
     pending_pairs: dict = {}
     peers = Peers(peers_path(name, state_dir))
 
@@ -79,16 +80,27 @@ def run(
             if claudio_type == 'pair_request':
                 remote_name = msg.get('name', '')
                 remote_socket = msg.get('socket', '')
-                # Hold the connection open; enqueue a notification
+                # Hold the connection open; enqueue a notification.
+                # If a request from this name is already pending, supersede it.
                 with lock:
-                    pending_pairs[remote_name] = (conn, remote_socket)
+                    existing = pending_pairs.get(remote_name)
+                    if existing is not None:
+                        old_conn, _, _ = existing
+                        try:
+                            old_conn.sendall(
+                                json.dumps({'ok': False, 'error': 'superseded by newer request'}).encode()
+                            )
+                            old_conn.close()
+                        except Exception:
+                            pass
+                    pending_pairs[remote_name] = (conn, remote_socket, time.time())
                     queue.append({
                         'body': (
                             f'[claudio]: {remote_name} at {remote_socket} wants to pair. '
                             f'Run: claudio pair --approve {remote_name}'
                         )
                     })
-                # Do NOT close conn here — it stays open until approved/rejected
+                # Do NOT close conn here — it stays open until approved/rejected/timed-out
 
             elif claudio_type == 'pair_approve':
                 approve_name = msg.get('name', '')
@@ -100,7 +112,7 @@ def run(
                     )
                     conn.close()
                 else:
-                    held_conn, remote_socket = pair_info
+                    held_conn, remote_socket, _ = pair_info
                     # Record the peer
                     peers.add(approve_name, remote_socket)
                     # Respond to alice's held connection
@@ -139,7 +151,33 @@ def run(
             t = threading.Thread(target=handle_connection, args=(conn,), daemon=True)
             t.start()
 
+    def cleanup_expired_pairs() -> None:
+        """Periodically close pair_request connections that have waited longer than PAIR_TIMEOUT."""
+        while True:
+            time.sleep(POLL_INTERVAL)
+            now = time.time()
+            with lock:
+                expired = [
+                    remote_name
+                    for remote_name, (_, _, ts) in pending_pairs.items()
+                    if now - ts > PAIR_TIMEOUT
+                ]
+            for remote_name in expired:
+                with lock:
+                    pair_info = pending_pairs.pop(remote_name, None)
+                if pair_info is None:
+                    continue
+                expired_conn, _, _ = pair_info
+                try:
+                    expired_conn.sendall(
+                        json.dumps({'ok': False, 'error': 'pair request timed out'}).encode()
+                    )
+                    expired_conn.close()
+                except Exception:
+                    pass
+
     threading.Thread(target=serve, daemon=True).start()
+    threading.Thread(target=cleanup_expired_pairs, daemon=True).start()
 
     while True:
         time.sleep(POLL_INTERVAL)
