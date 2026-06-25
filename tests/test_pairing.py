@@ -14,22 +14,7 @@ import claudio
 from claudio.agent import socket_path
 from claudio.peers import Peers, peers_path
 
-
-def _run_agent(name, deliver, is_idle, state_dir):
-    """Start claudio.run() in a daemon thread; wait for socket to appear."""
-    t = threading.Thread(
-        target=claudio.run,
-        kwargs=dict(name=name, deliver=deliver, is_idle=is_idle, state_dir=state_dir),
-        daemon=True,
-    )
-    t.start()
-    sock = socket_path(name, state_dir)
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        if os.path.exists(sock):
-            return
-        time.sleep(0.02)
-    raise RuntimeError(f"socket for agent '{name}' never appeared: {sock}")
+from tests.conftest import run_agent
 
 
 class TestPairRequestEnqueuesNotification(unittest.TestCase):
@@ -47,7 +32,7 @@ class TestPairRequestEnqueuesNotification(unittest.TestCase):
         sender_name = f'alice-{uuid4().hex[:8]}'
         sender_sock = socket_path(sender_name, self.tmpdir)
 
-        _run_agent(name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
+        run_agent(name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
 
         bob_sock = socket_path(name, self.tmpdir)
 
@@ -100,7 +85,7 @@ class TestPairApproveUnknown(unittest.TestCase):
     def test_pair_approve_unknown_name(self):
         """pair_approve for an unknown name returns ok=False."""
         name = f'bob-{uuid4().hex[:8]}'
-        _run_agent(name, lambda msg: None, lambda: True, self.tmpdir)
+        run_agent(name, lambda msg: None, lambda: True, self.tmpdir)
 
         bob_sock = socket_path(name, self.tmpdir)
         resp = claudio.send_to(bob_sock, {'_claudio': 'pair_approve', 'name': 'nobody'})
@@ -123,8 +108,8 @@ class TestPairEndToEnd(unittest.TestCase):
 
         bob_notifications = []
 
-        _run_agent(alice_name, lambda msg: None, lambda: True, self.tmpdir)
-        _run_agent(bob_name, lambda msg: bob_notifications.append(msg), lambda: True, self.tmpdir)
+        run_agent(alice_name, lambda msg: None, lambda: True, self.tmpdir)
+        run_agent(bob_name, lambda msg: bob_notifications.append(msg), lambda: True, self.tmpdir)
 
         alice_sock = socket_path(alice_name, self.tmpdir)
         bob_sock = socket_path(bob_name, self.tmpdir)

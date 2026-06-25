@@ -7,7 +7,6 @@ import os
 import shutil
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from uuid import uuid4
@@ -17,22 +16,7 @@ from claudio.agent import socket_path
 from claudio.cli import cmd_peers, cmd_send
 from claudio.peers import Peers, peers_path
 
-
-def _run_agent(name, deliver, is_idle, state_dir):
-    """Start claudio.run() in a daemon thread; wait for socket to appear."""
-    t = threading.Thread(
-        target=claudio.run,
-        kwargs=dict(name=name, deliver=deliver, is_idle=is_idle, state_dir=state_dir),
-        daemon=True,
-    )
-    t.start()
-    sock = socket_path(name, state_dir)
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        if os.path.exists(sock):
-            return
-        time.sleep(0.02)
-    raise RuntimeError(f"socket for agent '{name}' never appeared: {sock}")
+from tests.conftest import run_agent
 
 
 class TestSendBySockPath(unittest.TestCase):
@@ -47,7 +31,7 @@ class TestSendBySockPath(unittest.TestCase):
         """cmd_send with a full socket path delivers the message."""
         delivered = []
         name = f'agent-{uuid4().hex[:8]}'
-        _run_agent(name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
+        run_agent(name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
 
         sock = socket_path(name, self.tmpdir)
         rc = cmd_send([sock, 'hello from test'], state_dir=self.tmpdir, agent_name=name)
@@ -76,7 +60,7 @@ class TestSendByPeerName(unittest.TestCase):
         bob_name = f'bob-{uuid4().hex[:8]}'
         delivered = []
 
-        _run_agent(bob_name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
+        run_agent(bob_name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
         bob_sock = socket_path(bob_name, self.tmpdir)
 
         # Add bob to alice's peers file
@@ -109,7 +93,7 @@ class TestSendFallbackConvention(unittest.TestCase):
         delivered = []
 
         # Start agent using convention socket path (which is what the fallback resolves to)
-        _run_agent(target_name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
+        run_agent(target_name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
 
         caller_name = f'caller-{uuid4().hex[:8]}'
         # No peers file entry for target_name, so it falls back to socket_path(target_name, state_dir)
