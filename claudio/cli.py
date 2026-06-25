@@ -24,7 +24,7 @@ def _state_dir() -> str:
     return (
         os.environ.get('CLAUDIO_STATE_DIR')
         or os.environ.get('CMUX_STATE_DIR')
-        or DEFAULT_STATE_DIR
+        or os.path.abspath('.claudio')
     )
 
 
