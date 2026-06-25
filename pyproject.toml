@@ -11,3 +11,6 @@ dependencies = []
 
 [project.scripts]
 claudio = "claudio.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["claudio*"]
