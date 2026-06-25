@@ -14,7 +14,8 @@ from collections import deque
 from typing import Callable
 
 POLL_INTERVAL = 0.5  # seconds between idle checks
-DEFAULT_STATE_DIR = os.path.expanduser('~/.claudio')
+DEFAULT_STATE_DIR = '/tmp/claudio'
+_RECV_BUF = 65536
 
 
 def socket_path(name: str, state_dir: str = DEFAULT_STATE_DIR) -> str:
@@ -32,7 +33,7 @@ def send_to(sock_path: str, message: dict) -> dict:
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(sock_path)
     s.sendall(json.dumps(message).encode())
-    ack = s.recv(65536)
+    ack = s.recv(_RECV_BUF)
     s.close()
     return json.loads(ack) if ack else {}
 
@@ -68,7 +69,7 @@ def run(
 
     def handle_connection(conn: socket.socket) -> None:
         try:
-            data = conn.recv(65536)
+            data = conn.recv(_RECV_BUF)
             if not data:
                 conn.close()
                 return

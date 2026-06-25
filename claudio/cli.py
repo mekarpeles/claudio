@@ -12,7 +12,7 @@ import os
 import sys
 from typing import Optional
 
-from .agent import DEFAULT_STATE_DIR, send_to, socket_path
+from .agent import DEFAULT_STATE_DIR, _RECV_BUF, send_to, socket_path
 from .peers import Peers, peers_path
 
 
@@ -98,7 +98,7 @@ def cmd_pair(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
     s.sendall(json.dumps(msg).encode())
     s.settimeout(300)  # 5-minute timeout
     try:
-        data = s.recv(65536)
+        data = s.recv(_RECV_BUF)
     except _socket.timeout:
         print("claudio: pair request timed out (5 minutes)", file=sys.stderr)
         s.close()
