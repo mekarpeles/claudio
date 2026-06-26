@@ -28,13 +28,14 @@ def _state_dir() -> str:
     )
 
 
-def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> str:
+def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> Optional[str]:
     """
     Resolve a send target to a socket path.
 
     1. If target starts with / or ~: use as socket path directly.
     2. Look up in peers file (requires agent_name).
-    3. Fall back to socket_path(target, state_dir) convention.
+    3. Return None — caller must surface a clear error rather than silently
+       falling back to a convention-based path that may not exist.
     """
     if target.startswith('/') or target.startswith('~'):
         return os.path.expanduser(target)
@@ -43,7 +44,7 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> s
         sock = peers.get(target)
         if sock:
             return sock
-    return socket_path(target, state_dir)
+    return None
 
 
 def cmd_pair(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
@@ -154,6 +155,9 @@ def cmd_send(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
 
     target, message = args[0], args[1]
     sock_path = _resolve_target(target, state_dir, agent_name)
+    if sock_path is None:
+        print(f"claudio: no peer named '{target}' — run 'claudio pair' first", file=sys.stderr)
+        return 1
     try:
         resp = send_to(sock_path, {'body': message})
     except Exception as e:

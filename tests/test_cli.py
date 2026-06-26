@@ -95,7 +95,8 @@ class TestSendByPeerName(unittest.TestCase):
         self.assertEqual(delivered[0]['body'], 'hi from alice')
 
 
-class TestSendFallbackConvention(unittest.TestCase):
+class TestSendUnknownPeer(unittest.TestCase):
+    """Unknown peer name should fail immediately with a clear error, not a silent OS error."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -103,26 +104,48 @@ class TestSendFallbackConvention(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_send_falls_back_to_convention(self):
-        """Unknown peer name falls back to state_dir/<name>.sock convention."""
-        target_name = f'target-{uuid4().hex[:8]}'
-        delivered = []
-
-        # Start agent using convention socket path (which is what the fallback resolves to)
-        _run_agent(target_name, lambda msg: delivered.append(msg), lambda: True, self.tmpdir)
-
+    def test_send_unknown_name_no_peers_exits_nonzero(self):
+        """cmd_send with an unknown name and no peers file returns non-zero."""
         caller_name = f'caller-{uuid4().hex[:8]}'
-        # No peers file entry for target_name, so it falls back to socket_path(target_name, state_dir)
-        rc = cmd_send([target_name, 'fallback msg'], state_dir=self.tmpdir, agent_name=caller_name)
-        self.assertEqual(rc, 0)
+        rc = cmd_send(['unknownagent', 'hi'], state_dir=self.tmpdir, agent_name=caller_name)
+        self.assertNotEqual(rc, 0)
 
-        deadline = time.time() + 3
-        while time.time() < deadline:
-            if delivered:
-                break
-            time.sleep(0.1)
-        self.assertTrue(delivered)
-        self.assertEqual(delivered[0]['body'], 'fallback msg')
+    def test_send_unknown_name_no_peers_emits_clear_error(self):
+        """cmd_send with an unknown name prints a helpful 'no peer named' message, not an OSError."""
+        caller_name = f'caller-{uuid4().hex[:8]}'
+        captured = io.StringIO()
+        old_stderr = sys.stderr
+        sys.stderr = captured
+        try:
+            cmd_send(['unknownagent', 'hi'], state_dir=self.tmpdir, agent_name=caller_name)
+        finally:
+            sys.stderr = old_stderr
+        err = captured.getvalue()
+        self.assertIn('unknownagent', err)
+        self.assertIn('pair', err)
+        # Must NOT be a raw OS/socket error
+        self.assertNotIn('OSError', err)
+        self.assertNotIn('No such file', err)
+        self.assertNotIn('Connection refused', err)
+
+    def test_send_unknown_name_with_peers_file_but_not_listed(self):
+        """cmd_send with a name not in the peers file (but file exists) also fails clearly."""
+        caller_name = f'caller-{uuid4().hex[:8]}'
+        # Seed a peers file with a different entry so the file exists
+        p = Peers(peers_path(caller_name, self.tmpdir))
+        p.add('someotherpeer', '/tmp/other.sock')
+
+        captured = io.StringIO()
+        old_stderr = sys.stderr
+        sys.stderr = captured
+        try:
+            rc = cmd_send(['unknownagent', 'hi'], state_dir=self.tmpdir, agent_name=caller_name)
+        finally:
+            sys.stderr = old_stderr
+        self.assertNotEqual(rc, 0)
+        err = captured.getvalue()
+        self.assertIn('unknownagent', err)
+        self.assertIn('pair', err)
 
 
 class TestPeersEmpty(unittest.TestCase):
