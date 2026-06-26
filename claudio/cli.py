@@ -50,19 +50,17 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> O
 
 
 def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
-    """claudio start [<name>] — start a daemon in the foreground."""
+    """claudio [<name>] — start an ephemeral Claude Code session with a messaging daemon."""
+    import subprocess as _sp
     state_dir = state_dir or _state_dir()
     agent_name = agent_name or (args[0] if args else None) or _agent_name()
     if agent_name is None:
         agent_name = _next_session_name(state_dir)
 
-    delivered = []
-
     def deliver(msg):
         sender = msg.get('from', 'claudio')
         body = msg.get('body', repr(msg))
-        print(f"[{sender}]: {body}")
-        delivered.append(msg)
+        print(f"\n[{sender}@claudio]: {body}", flush=True)
 
     name = _start(
         name=agent_name,
@@ -72,19 +70,23 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     )
 
     sock = socket_path(name, state_dir)
-    print(f"claudio: session '{name}' listening at {sock}")
-    print(f"claudio: press Ctrl-C to stop")
+    print(f"claudio: session '{name}' at {sock}")
 
+    claude_bin = os.environ.get('CLAUDIO_CLAUDE_CMD', 'claude')
+    env = os.environ.copy()
+    env['CLAUDIO_AGENT_NAME'] = name
+    env['CLAUDIO_STATE_DIR'] = state_dir
     try:
-        while True:
-            time.sleep(1)
+        _sp.run([claude_bin], env=env)
     except KeyboardInterrupt:
+        pass
+    finally:
         print(f"\nclaudio: stopped '{name}'")
         try:
             os.unlink(sock)
         except FileNotFoundError:
             pass
-        return 0
+    return 0
 
 
 def cmd_discover(args: list, state_dir: Optional[str] = None) -> int:
