@@ -63,9 +63,40 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     if agent_name is None:
         agent_name = _next_session_name(state_dir)
 
-    # PTY master fd — set after the PTY is created so deliver() can write to it.
-    # deliver() runs on a background thread; writes to a PTY fd are atomic for
-    # small payloads, so no lock is needed.
+    tmux_pane = os.environ.get('TMUX_PANE')
+
+    if tmux_pane:
+        # Inside tmux — use send-keys for injection (the proven path, same as cmux).
+        # Run claude directly; no PTY proxy needed.
+        def deliver(msg):
+            sender = msg.get('from', 'claudio')
+            body = msg.get('body', repr(msg))
+            text = f'[{sender}@claudio]: {body}'
+            _sp.run(['tmux', 'send-keys', '-t', tmux_pane, text], capture_output=True)
+            time.sleep(0.05)
+            _sp.run(['tmux', 'send-keys', '-t', tmux_pane, '', 'Enter'], capture_output=True)
+
+        name = _start(name=agent_name, deliver=deliver, is_idle=lambda: True, state_dir=state_dir)
+        sock = socket_path(name, state_dir)
+        print(f"claudio: session '{name}' at {sock}")
+
+        claude_bin = os.environ.get('CLAUDIO_CLAUDE_CMD', 'claude')
+        env = os.environ.copy()
+        env['CLAUDIO_AGENT_NAME'] = name
+        env['CLAUDIO_STATE_DIR'] = state_dir
+        try:
+            _sp.run([claude_bin], env=env)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print(f"\nclaudio: stopped '{name}'")
+            try:
+                os.unlink(sock)
+            except FileNotFoundError:
+                pass
+        return 0
+
+    # Not in tmux — use a PTY proxy so we can inject via the master fd.
     _pty_master: list = [None]
 
     def deliver(msg):
@@ -81,13 +112,7 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
         except OSError:
             pass
 
-    name = _start(
-        name=agent_name,
-        deliver=deliver,
-        is_idle=lambda: True,
-        state_dir=state_dir,
-    )
-
+    name = _start(name=agent_name, deliver=deliver, is_idle=lambda: True, state_dir=state_dir)
     sock = socket_path(name, state_dir)
     print(f"claudio: session '{name}' at {sock}")
 
