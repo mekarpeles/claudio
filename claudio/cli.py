@@ -351,7 +351,7 @@ claudio — peer-to-peer messaging for Claude Code agents
 
 Usage:
   claudio [<name>]                   Start a daemon (auto-names 0, 1, 2... if omitted)
-  claudio discover                   List all running claudio agents
+  claudio ls                         List all running claudio agents
   claudio pair <name|socket>         Pair with the agent named <name> or at <socket> (blocks until approved)
   claudio pair --approve <name>      Approve a pending pair request from <name>
   claudio peers                      List current peers
@@ -367,11 +367,11 @@ Quick start (two terminals):
   term3$ CLAUDIO_AGENT_NAME=alice claudio pair /tmp/claudio/bob.sock
   term4$ CLAUDIO_AGENT_NAME=bob   claudio pair --approve alice
   term3$ CLAUDIO_AGENT_NAME=alice claudio send bob "hello"
-  term5$ claudio discover
+  term5$ claudio ls
 """
 
 
-_SUBCOMMANDS = {'discover', 'pair', 'peers', 'send'}
+_SUBCOMMANDS = {'ls', 'discover', 'pair', 'peers', 'send'}
 
 
 def main() -> None:
@@ -388,7 +388,7 @@ def main() -> None:
         # treat cmd as optional name: `claudio [name]` or `claudio start [name]`
         name_args = rest if cmd == 'start' else args
         sys.exit(cmd_start(name_args))
-    elif cmd == 'discover':
+    elif cmd in ('ls', 'discover'):  # discover kept as alias
         sys.exit(cmd_discover(rest))
     elif cmd == 'pair':
         sys.exit(cmd_pair(rest))

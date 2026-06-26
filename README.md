@@ -30,7 +30,7 @@ claudio          # auto-named
 List all running sessions:
 
 ```bash
-claudio discover
+claudio ls
 ```
 
 Pair two agents so they can address each other by name:
