@@ -422,12 +422,17 @@
       <div class="prose">
         <p><code class="t">cmux</code> is a multiplexer that enables you to easily run multiple concurrent, communicating <code class="t">claudio</code> agents using tmux. It has a CLI that feels like <code>tmux</code> meets <code>docker</code>. You can manage Claude sessions in tmux windows, spin up new agents, and have agents message each other directly in real time.</p>
       </div>
-      <div class="code-block">
-        <div class="comment"># start a named agent</div>
-        <div class="prompt">cmux up alice -d</div>
-        <br>
-        <div class="comment"># send it a message</div>
-        <span class="prompt">cmux send alice "please review PR #42"</span>
+      <div>
+        <div class="term" id="term-cmux-wrap">
+          <div class="term-bar">
+            <div class="lights"><span class="l-r"></span><span class="l-y"></span><span class="l-g"></span></div>
+            <div class="name">~/projects</div>
+          </div>
+          <div class="term-body" id="term-cmux"></div>
+        </div>
+        <div class="demo-replay" style="margin-top:12px">
+          <button id="cmux-replay-btn">↻ replay</button>
+        </div>
       </div>
     </div>
   </div>
@@ -438,10 +443,18 @@
   <div class="wrap">
     <h2>Per-agent TODOs with <code class="t">cq</code></h2>
     <div class="two-col">
-      <div class="code-block"><span class="comment"># create an issue for the current agent</span>
-<span class="prompt">cq issue create -t "review PR #42"</span>
-<span class="prompt">cq issue list</span>
-<span class="prompt">cq issue close 1</span></div>
+      <div>
+        <div class="term" id="term-cq-wrap">
+          <div class="term-bar">
+            <div class="lights"><span class="l-r"></span><span class="l-y"></span><span class="l-g"></span></div>
+            <div class="name">alice</div>
+          </div>
+          <div class="term-body" id="term-cq"></div>
+        </div>
+        <div class="demo-replay" style="margin-top:12px">
+          <button id="cq-replay-btn">↻ replay</button>
+        </div>
+      </div>
       <div class="prose">
         <p><code class="t">cq</code> is a lightweight task queue designed for <code class="t">claudio</code> agents. It is based on <code>gh</code> and implements GitHub's Issues API locally as <code>.cq/</code> on disk. <code class="t">cq</code> works without <code class="t">claudio</code> but <code class="t">claudio</code> and <code class="t">cmux</code> offer utilities to make these tools work seamlessly together.</p>
       </div>
@@ -597,6 +610,137 @@
   }, { threshold: 0.3 });
   io.observe(document.getElementById("demo"));
 
+  reset();
+})();
+
+/* ---------- cmux demo ---------- */
+(function () {
+  var el = document.getElementById("term-cmux");
+  if (!el) return;
+
+  var P = '<span class="prompt">$ </span>';
+  var steps = [
+    { type: "type",  html: P + "cmux ls" },
+    { type: "print", html: '<span class="dim">NAME     STATUS    UPTIME</span>', wait: 200 },
+    { type: "print", html: 'alice    <span class="ok">running</span>   2h 14m' },
+    { type: "print", html: 'bob      <span class="ok">running</span>     47m' },
+    { type: "print", html: 'carol    <span class="ok">running</span>     12m' },
+    { type: "print", html: '', wait: 500 },
+    { type: "type",  html: P + 'cmux send alice "can you review PR #42?"', wait: 400 },
+    { type: "print", html: '<span class="ok">✓ sent → alice</span>', wait: 300 },
+    { type: "print", html: '', wait: 300 },
+    { type: "type",  html: P + 'cmux send bob "coordinate with alice on the review"', wait: 400 },
+    { type: "print", html: '<span class="ok">✓ sent → bob</span>', wait: 300 },
+  ];
+
+  var CHAR_MS = 22, LINE_MS = 360, LOOP_PAUSE = 4200;
+  var timers = [], running = false;
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+  function reset() { el.innerHTML = '<span class="cursor"></span>'; }
+  function ensureCursor() { if (!el.querySelector(".cursor")) { var c = document.createElement("span"); c.className = "cursor"; el.appendChild(c); } }
+  function removeCursor() { var c = el.querySelector(".cursor"); if (c) c.remove(); }
+  function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function run(idx) {
+    if (idx >= steps.length) { timers.push(setTimeout(start, LOOP_PAUSE)); return; }
+    var step = steps[idx];
+    timers.push(setTimeout(function () {
+      removeCursor();
+      var line = document.createElement("div");
+      el.appendChild(line);
+      if (step.type === "print") {
+        line.innerHTML = step.html;
+        ensureCursor();
+        timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS));
+      } else {
+        var tmp = document.createElement("div"); tmp.innerHTML = step.html;
+        var ps = tmp.querySelector(".prompt");
+        var ph = ps ? ps.outerHTML : ""; if (ps) ps.remove();
+        var text = tmp.textContent, i = 0;
+        (function tick() {
+          line.innerHTML = ph + escapeHtml(text.slice(0, i));
+          var c = line.querySelector(".cursor"); if (c) c.remove();
+          var cur = document.createElement("span"); cur.className = "cursor"; line.appendChild(cur);
+          i++;
+          if (i <= text.length) timers.push(setTimeout(tick, CHAR_MS));
+          else { removeCursor(); ensureCursor(); timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS)); }
+        })();
+      }
+    }, step.wait || 0));
+  }
+
+  function start() { clearTimers(); reset(); run(0); }
+  document.getElementById("cmux-replay-btn").addEventListener("click", start);
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting && !running) { running = true; start(); io.disconnect(); } });
+  }, { threshold: 0.3 });
+  io.observe(document.getElementById("term-cmux-wrap"));
+  reset();
+})();
+
+/* ---------- cq demo ---------- */
+(function () {
+  var el = document.getElementById("term-cq");
+  if (!el) return;
+
+  var P = '<span class="prompt">$ </span>';
+  var steps = [
+    { type: "type",  html: P + 'cq issue create -t "review PR #42"' },
+    { type: "print", html: '<span class="ok">#1</span>  review PR #42', wait: 200 },
+    { type: "print", html: '', wait: 400 },
+    { type: "type",  html: P + 'cq issue comment 1 "left notes on the diff"', wait: 300 },
+    { type: "print", html: '<span class="ok">comment added on #1</span>', wait: 200 },
+    { type: "print", html: '', wait: 400 },
+    { type: "type",  html: P + 'cq issue list', wait: 300 },
+    { type: "print", html: '<span class="dim">#   TITLE              STATUS</span>', wait: 200 },
+    { type: "print", html: '<span class="ok">1</span>   review PR #42     open' },
+    { type: "print", html: '', wait: 400 },
+    { type: "type",  html: P + 'cq issue close 1', wait: 300 },
+    { type: "print", html: '<span class="ok">closed #1</span>', wait: 200 },
+  ];
+
+  var CHAR_MS = 22, LINE_MS = 360, LOOP_PAUSE = 4200;
+  var timers = [], running = false;
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+  function reset() { el.innerHTML = '<span class="cursor"></span>'; }
+  function ensureCursor() { if (!el.querySelector(".cursor")) { var c = document.createElement("span"); c.className = "cursor"; el.appendChild(c); } }
+  function removeCursor() { var c = el.querySelector(".cursor"); if (c) c.remove(); }
+  function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function run(idx) {
+    if (idx >= steps.length) { timers.push(setTimeout(start, LOOP_PAUSE)); return; }
+    var step = steps[idx];
+    timers.push(setTimeout(function () {
+      removeCursor();
+      var line = document.createElement("div");
+      el.appendChild(line);
+      if (step.type === "print") {
+        line.innerHTML = step.html;
+        ensureCursor();
+        timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS));
+      } else {
+        var tmp = document.createElement("div"); tmp.innerHTML = step.html;
+        var ps = tmp.querySelector(".prompt");
+        var ph = ps ? ps.outerHTML : ""; if (ps) ps.remove();
+        var text = tmp.textContent, i = 0;
+        (function tick() {
+          line.innerHTML = ph + escapeHtml(text.slice(0, i));
+          var c = line.querySelector(".cursor"); if (c) c.remove();
+          var cur = document.createElement("span"); cur.className = "cursor"; line.appendChild(cur);
+          i++;
+          if (i <= text.length) timers.push(setTimeout(tick, CHAR_MS));
+          else { removeCursor(); ensureCursor(); timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS)); }
+        })();
+      }
+    }, step.wait || 0));
+  }
+
+  function start() { clearTimers(); reset(); run(0); }
+  document.getElementById("cq-replay-btn").addEventListener("click", start);
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting && !running) { running = true; start(); io.disconnect(); } });
+  }, { threshold: 0.3 });
+  io.observe(document.getElementById("term-cq-wrap"));
   reset();
 })();
 </script>
