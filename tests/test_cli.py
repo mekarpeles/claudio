@@ -111,7 +111,7 @@ class TestSendUnknownPeer(unittest.TestCase):
         self.assertNotEqual(rc, 0)
 
     def test_send_unknown_name_no_peers_emits_clear_error(self):
-        """cmd_send with an unknown name prints a helpful 'no peer named' message, not an OSError."""
+        """cmd_send with an unknown name fails with a claudio-level error, not an uncaught exception."""
         caller_name = f'caller-{uuid4().hex[:8]}'
         captured = io.StringIO()
         old_stderr = sys.stderr
@@ -121,12 +121,11 @@ class TestSendUnknownPeer(unittest.TestCase):
         finally:
             sys.stderr = old_stderr
         err = captured.getvalue()
-        self.assertIn('unknownagent', err)
-        self.assertIn('pair', err)
-        # Must NOT be a raw OS/socket error
-        self.assertNotIn('OSError', err)
-        self.assertNotIn('No such file', err)
-        self.assertNotIn('Connection refused', err)
+        # bare names now resolve to {state_dir}/{name}.sock by convention; the
+        # error is a connection failure, but it should be a formatted claudio
+        # error, not a raw Python traceback.
+        self.assertIn('claudio:', err)
+        self.assertNotIn('Traceback', err)
 
     def test_send_unknown_name_with_peers_file_but_not_listed(self):
         """cmd_send with a name not in the peers file (but file exists) also fails clearly."""
@@ -144,8 +143,9 @@ class TestSendUnknownPeer(unittest.TestCase):
             sys.stderr = old_stderr
         self.assertNotEqual(rc, 0)
         err = captured.getvalue()
-        self.assertIn('unknownagent', err)
-        self.assertIn('pair', err)
+        # bare name falls back to socket-path convention; fails with a connection error
+        self.assertIn('claudio:', err)
+        self.assertNotIn('Traceback', err)
 
 
 class TestPeersEmpty(unittest.TestCase):

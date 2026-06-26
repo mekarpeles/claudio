@@ -52,9 +52,11 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> O
 
 def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
     """claudio [<name>] — start an ephemeral Claude Code session with a messaging daemon."""
+    import fcntl as _fcntl
     import pty as _pty
     import select as _select
-    import subprocess as _sp
+    import signal as _signal
+    import struct as _struct
     import termios as _termios
     import tty as _tty
 
@@ -63,40 +65,7 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     if agent_name is None:
         agent_name = _next_session_name(state_dir)
 
-    tmux_pane = os.environ.get('TMUX_PANE')
-
-    if tmux_pane:
-        # Inside tmux — use send-keys for injection (the proven path, same as cmux).
-        # Run claude directly; no PTY proxy needed.
-        def deliver(msg):
-            sender = msg.get('from', 'claudio')
-            body = msg.get('body', repr(msg))
-            text = f'[{sender}@claudio]: {body}'
-            _sp.run(['tmux', 'send-keys', '-t', tmux_pane, text], capture_output=True)
-            time.sleep(0.05)
-            _sp.run(['tmux', 'send-keys', '-t', tmux_pane, '', 'Enter'], capture_output=True)
-
-        name = _start(name=agent_name, deliver=deliver, is_idle=lambda: True, state_dir=state_dir)
-        sock = socket_path(name, state_dir)
-        print(f"claudio: session '{name}' at {sock}")
-
-        claude_bin = os.environ.get('CLAUDIO_CLAUDE_CMD', 'claude')
-        env = os.environ.copy()
-        env['CLAUDIO_AGENT_NAME'] = name
-        env['CLAUDIO_STATE_DIR'] = state_dir
-        try:
-            _sp.run([claude_bin], env=env)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            print(f"\nclaudio: stopped '{name}'")
-            try:
-                os.unlink(sock)
-            except FileNotFoundError:
-                pass
-        return 0
-
-    # Not in tmux — use a PTY proxy so we can inject via the master fd.
+    # PTY master fd — set before fork so deliver() can write immediately after fork.
     _pty_master: list = [None]
 
     def deliver(msg):
@@ -108,6 +77,8 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
         try:
             os.write(fd, f'[{sender}@claudio]: {body}'.encode())
             time.sleep(0.05)
+            # \r is Enter in raw-mode PTY; pty.fork() ensures the slave is the
+            # child's controlling terminal so Node.js setRawMode works correctly.
             os.write(fd, b'\r')
         except OSError:
             pass
@@ -121,21 +92,64 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     env['CLAUDIO_AGENT_NAME'] = name
     env['CLAUDIO_STATE_DIR'] = state_dir
 
-    master_fd, slave_fd = _pty.openpty()
+    stdin_fd = sys.stdin.fileno()
+
+    # pty.fork() forks, calls setsid() in the child, opens a PTY, and wires the
+    # slave as the child's controlling terminal + stdin/stdout/stderr.  This is
+    # what makes Node.js setRawMode(true) work, which in turn makes \r submit.
+    pid, master_fd = _pty.fork()
+    if pid == 0:
+        # Child: exec claude.  pty.fork already set up the controlling terminal.
+        try:
+            os.execvpe(claude_bin, [claude_bin], env)
+        except Exception:
+            pass
+        os._exit(1)
+
+    # Parent: proxy stdin ↔ PTY master and deliver queued messages via master write.
     _pty_master[0] = master_fd
 
-    proc = _sp.Popen(
-        [claude_bin],
-        stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
-        env=env, close_fds=True,
-    )
-    os.close(slave_fd)
+    # Mirror the real terminal's window size into the PTY so claude's TUI renders
+    # at full width.  TIOCSWINSZ values: macOS 0x80087467, Linux 0x5414.
+    try:
+        ts = os.get_terminal_size(stdin_fd)
+        winsize = _struct.pack('HHHH', ts.lines, ts.columns, 0, 0)
+        for _ioctl in (0x80087467, 0x5414):
+            try:
+                _fcntl.ioctl(master_fd, _ioctl, winsize)
+                break
+            except OSError:
+                pass
+    except Exception:
+        pass
 
-    stdin_fd = sys.stdin.fileno()
     old_settings = _termios.tcgetattr(stdin_fd)
+
+    # Forward SIGWINCH so resize events reach claude inside the PTY.
+    def _handle_winch(signum, frame):
+        try:
+            ts = os.get_terminal_size(stdin_fd)
+            winsize = _struct.pack('HHHH', ts.lines, ts.columns, 0, 0)
+            for _ioctl in (0x80087467, 0x5414):
+                try:
+                    _fcntl.ioctl(master_fd, _ioctl, winsize)
+                    break
+                except OSError:
+                    pass
+        except Exception:
+            pass
+
+    _signal.signal(_signal.SIGWINCH, _handle_winch)
+
     try:
         _tty.setraw(stdin_fd)
-        while proc.poll() is None:
+        while True:
+            try:
+                wpid, _ = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if wpid != 0:
+                break
             try:
                 rlist, _, _ = _select.select([stdin_fd, master_fd], [], [], 0.05)
             except (ValueError, OSError):
@@ -151,8 +165,12 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
                 except OSError:
                     break
     except KeyboardInterrupt:
-        proc.terminate()
+        try:
+            os.kill(pid, _signal.SIGTERM)
+        except ProcessLookupError:
+            pass
     finally:
+        _signal.signal(_signal.SIGWINCH, _signal.SIG_DFL)
         _termios.tcsetattr(stdin_fd, _termios.TCSADRAIN, old_settings)
         _pty_master[0] = None
         try:

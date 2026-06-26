@@ -183,7 +183,7 @@ class TestCmdPairInitiateNoArgs(unittest.TestCase):
 
 
 class TestCmdPairInitiateNoAgentName(unittest.TestCase):
-    """cmd_pair_initiate without agent_name returns 1."""
+    """cmd_pair_initiate without agent_name auto-assigns one and attempts connection."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -196,6 +196,9 @@ class TestCmdPairInitiateNoAgentName(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_no_agent_name(self):
+        # cmd_pair_initiate now auto-assigns an agent name via _next_session_name,
+        # so the missing-name gate is no longer hit.  It proceeds to connect and
+        # fails because /tmp/fake.sock doesn't exist.
         env_backup = {}
         for k in ('CLAUDIO_AGENT_NAME', 'CMUX_SESSION_NAME'):
             env_backup[k] = os.environ.pop(k, None)
@@ -206,7 +209,7 @@ class TestCmdPairInitiateNoAgentName(unittest.TestCase):
                 if v is not None:
                     os.environ[k] = v
         self.assertEqual(rc, 1)
-        self.assertIn('CLAUDIO_AGENT_NAME', self.stderr.getvalue())
+        self.assertIn('cannot connect', self.stderr.getvalue())
 
 
 class TestCmdPairInitiateCannotConnect(unittest.TestCase):
