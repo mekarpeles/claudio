@@ -52,16 +52,33 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> O
 
 def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
     """claudio [<name>] — start an ephemeral Claude Code session with a messaging daemon."""
+    import pty as _pty
+    import select as _select
     import subprocess as _sp
+    import termios as _termios
+    import tty as _tty
+
     state_dir = state_dir or _state_dir()
     agent_name = agent_name or (args[0] if args else None) or _agent_name()
     if agent_name is None:
         agent_name = _next_session_name(state_dir)
 
+    # PTY master fd — set after the PTY is created so deliver() can write to it.
+    # deliver() runs on a background thread; writes to a PTY fd are atomic for
+    # small payloads, so no lock is needed.
+    _pty_master: list = [None]
+
     def deliver(msg):
+        fd = _pty_master[0]
+        if fd is None:
+            return
         sender = msg.get('from', 'claudio')
         body = msg.get('body', repr(msg))
-        print(f"\n[{sender}@claudio]: {body}", flush=True)
+        text = f'[{sender}@claudio]: {body}\n'
+        try:
+            os.write(fd, text.encode())
+        except OSError:
+            pass
 
     name = _start(
         name=agent_name,
@@ -77,16 +94,51 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     env = os.environ.copy()
     env['CLAUDIO_AGENT_NAME'] = name
     env['CLAUDIO_STATE_DIR'] = state_dir
+
+    master_fd, slave_fd = _pty.openpty()
+    _pty_master[0] = master_fd
+
+    proc = _sp.Popen(
+        [claude_bin],
+        stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+        env=env, close_fds=True,
+    )
+    os.close(slave_fd)
+
+    stdin_fd = sys.stdin.fileno()
+    old_settings = _termios.tcgetattr(stdin_fd)
     try:
-        _sp.run([claude_bin], env=env)
+        _tty.setraw(stdin_fd)
+        while proc.poll() is None:
+            try:
+                rlist, _, _ = _select.select([stdin_fd, master_fd], [], [], 0.05)
+            except (ValueError, OSError):
+                break
+            if stdin_fd in rlist:
+                try:
+                    os.write(master_fd, os.read(stdin_fd, 1024))
+                except OSError:
+                    break
+            if master_fd in rlist:
+                try:
+                    os.write(sys.stdout.fileno(), os.read(master_fd, 4096))
+                except OSError:
+                    break
     except KeyboardInterrupt:
-        pass
+        proc.terminate()
     finally:
-        print(f"\nclaudio: stopped '{name}'")
+        _termios.tcsetattr(stdin_fd, _termios.TCSADRAIN, old_settings)
+        _pty_master[0] = None
         try:
-            os.unlink(sock)
-        except FileNotFoundError:
+            os.close(master_fd)
+        except OSError:
             pass
+
+    print(f"\nclaudio: stopped '{name}'")
+    try:
+        os.unlink(sock)
+    except FileNotFoundError:
+        pass
     return 0
 
 
