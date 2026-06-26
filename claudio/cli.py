@@ -65,21 +65,19 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     if agent_name is None:
         agent_name = _next_session_name(state_dir)
 
-    # PTY master fd — set before fork so deliver() can write immediately after fork.
-    _pty_master: list = [None]
+    # deliver() writes into this pipe; the proxy loop reads inject_r and writes
+    # to master_fd — keeps all master_fd writes on the main thread and combines
+    # text + \r into one atomic write (no gap between typed text and Enter).
+    inject_r, inject_w = os.pipe()
+    for _ifd in (inject_r, inject_w):
+        _flags = _fcntl.fcntl(_ifd, _fcntl.F_GETFD)
+        _fcntl.fcntl(_ifd, _fcntl.F_SETFD, _flags | _fcntl.FD_CLOEXEC)
 
     def deliver(msg):
-        fd = _pty_master[0]
-        if fd is None:
-            return
         sender = msg.get('from', 'claudio')
         body = msg.get('body', repr(msg))
         try:
-            os.write(fd, f'[{sender}@claudio]: {body}'.encode())
-            time.sleep(0.05)
-            # \r is Enter in raw-mode PTY; pty.fork() ensures the slave is the
-            # child's controlling terminal so Node.js setRawMode works correctly.
-            os.write(fd, b'\r')
+            os.write(inject_w, f'[{sender}@claudio]: {body}\r'.encode())
         except OSError:
             pass
 
@@ -106,8 +104,7 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
             pass
         os._exit(1)
 
-    # Parent: proxy stdin ↔ PTY master and deliver queued messages via master write.
-    _pty_master[0] = master_fd
+    # Parent: proxy stdin ↔ PTY master; inject_r carries delivered messages.
 
     # Mirror the real terminal's window size into the PTY so claude's TUI renders
     # at full width.  TIOCSWINSZ values: macOS 0x80087467, Linux 0x5414.
@@ -151,12 +148,17 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
             if wpid != 0:
                 break
             try:
-                rlist, _, _ = _select.select([stdin_fd, master_fd], [], [], 0.05)
+                rlist, _, _ = _select.select([stdin_fd, master_fd, inject_r], [], [], 0.05)
             except (ValueError, OSError):
                 break
             if stdin_fd in rlist:
                 try:
                     os.write(master_fd, os.read(stdin_fd, 1024))
+                except OSError:
+                    break
+            if inject_r in rlist:
+                try:
+                    os.write(master_fd, os.read(inject_r, 4096))
                 except OSError:
                     break
             if master_fd in rlist:
@@ -172,11 +174,11 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     finally:
         _signal.signal(_signal.SIGWINCH, _signal.SIG_DFL)
         _termios.tcsetattr(stdin_fd, _termios.TCSADRAIN, old_settings)
-        _pty_master[0] = None
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
+        for _fd in (inject_r, inject_w, master_fd):
+            try:
+                os.close(_fd)
+            except OSError:
+                pass
 
     print(f"\nclaudio: stopped '{name}'")
     try:
