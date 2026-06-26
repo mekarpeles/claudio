@@ -2,17 +2,20 @@
 claudio CLI — peer management and message sending commands.
 
 Commands:
-    claudio pair <socket>              # initiate pairing (blocks until approved, 5min timeout)
-    claudio pair --approve <name>      # approve a pending pair request from <name>
-    claudio peers                      # list current peers
-    claudio send <name|socket> <msg>   # send a message to a peer
+    claudio start [<name>]             Start a daemon (name optional, auto-assigned if omitted)
+    claudio discover                   List all running claudio agents
+    claudio pair <socket>              Initiate pairing (blocks until approved, 5min timeout)
+    claudio pair --approve <name>      Approve a pending pair request from <name>
+    claudio peers                      List current peers
+    claudio send <name|socket> <msg>   Send a message to a peer
 """
 
 import os
 import sys
+import time
 from typing import Optional
 
-from .agent import DEFAULT_STATE_DIR, send_to, socket_path
+from .agent import DEFAULT_STATE_DIR, _next_session_name, send_to, socket_path, start as _start
 from .peers import Peers, peers_path
 
 
@@ -44,6 +47,86 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> O
         if sock:
             return sock
     return None
+
+
+def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+    """claudio start [<name>] — start a daemon in the foreground."""
+    state_dir = state_dir or _state_dir()
+    agent_name = agent_name or (args[0] if args else None) or _agent_name()
+    if agent_name is None:
+        agent_name = _next_session_name(state_dir)
+
+    delivered = []
+
+    def deliver(msg):
+        sender = msg.get('from', 'claudio')
+        body = msg.get('body', repr(msg))
+        print(f"[{sender}]: {body}")
+        delivered.append(msg)
+
+    name = _start(
+        name=agent_name,
+        deliver=deliver,
+        is_idle=lambda: True,
+        state_dir=state_dir,
+    )
+
+    sock = socket_path(name, state_dir)
+    print(f"claudio: session '{name}' listening at {sock}")
+    print(f"claudio: press Ctrl-C to stop")
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"\nclaudio: stopped '{name}'")
+        try:
+            os.unlink(sock)
+        except FileNotFoundError:
+            pass
+        return 0
+
+
+def cmd_discover(args: list, state_dir: Optional[str] = None) -> int:
+    """claudio discover — list all running claudio agents."""
+    import socket as _socket
+
+    state_dir = state_dir or _state_dir()
+    try:
+        entries = os.listdir(state_dir)
+    except FileNotFoundError:
+        print("(no agents running)")
+        return 0
+
+    socks = sorted(f for f in entries if f.endswith('.sock'))
+    if not socks:
+        print("(no agents running)")
+        return 0
+
+    live = []
+    for fname in socks:
+        name = fname[:-5]
+        path = os.path.join(state_dir, fname)
+        alive = False
+        try:
+            c = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            c.settimeout(0.5)
+            c.connect(path)
+            c.close()
+            alive = True
+        except Exception:
+            pass
+        if alive:
+            live.append((name, path))
+
+    if not live:
+        print("(no agents running)")
+        return 0
+
+    name_w = max(len(n) for n, _ in live)
+    for name, path in live:
+        print(f"{name:<{name_w}}   {path}")
+    return 0
 
 
 def cmd_pair_approve(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
@@ -138,7 +221,6 @@ def cmd_pair_initiate(args: list, state_dir: Optional[str] = None, agent_name: O
     if resp.get('ok'):
         remote_name = resp.get('name', target_socket)
         remote_sock = resp.get('socket', target_socket)
-        # Record the peer locally
         peers = Peers(peers_path(agent_name, state_dir))
         peers.add(remote_name, remote_sock)
         print(f"claudio: paired with {remote_name}")
@@ -205,64 +287,28 @@ def cmd_send(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
         return 1
 
 
-def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
-    """claudio start [<name>] — start a daemon in the foreground, print incoming messages."""
-    import claudio as _claudio
-
-    state_dir = state_dir or _state_dir()
-    agent_name = agent_name or (args[0] if args else None) or _agent_name()
-
-    if not agent_name:
-        print("usage: claudio start <name>  (or set CLAUDIO_AGENT_NAME)", file=sys.stderr)
-        return 1
-
-    sock = socket_path(agent_name, state_dir)
-    print(f"claudio: agent '{agent_name}' listening at {sock}")
-    print(f"claudio: press Ctrl-C to stop\n")
-
-    def deliver(msg):
-        sender = msg.get('from', 'claudio')
-        body = msg.get('body', repr(msg))
-        print(f"[{sender}]: {body}")
-
-    try:
-        _claudio.run(
-            name=agent_name,
-            deliver=deliver,
-            is_idle=lambda: True,
-            state_dir=state_dir,
-        )
-    except KeyboardInterrupt:
-        print(f"\nclaudio: stopped '{agent_name}'")
-        try:
-            os.unlink(sock)
-        except FileNotFoundError:
-            pass
-        return 0
-
-
 USAGE = """\
 claudio — peer-to-peer messaging for Claude Code agents
 
 Usage:
-  claudio start <name>               Start a daemon in the foreground (Ctrl-C to stop)
+  claudio start [<name>]             Start a daemon (auto-names 0, 1, 2... if omitted)
+  claudio discover                   List all running claudio agents
   claudio pair <socket>              Pair with the agent at <socket> (blocks until approved)
   claudio pair --approve <name>      Approve a pending pair request from <name>
   claudio peers                      List current peers
   claudio send <name|socket> <msg>   Send a message to a peer
 
 Environment:
-  CLAUDIO_AGENT_NAME   This agent's name (falls back to CMUX_SESSION_NAME)
-  CLAUDIO_STATE_DIR    State directory  (falls back to CMUX_STATE_DIR, then ~/.claudio)
+  CLAUDIO_AGENT_NAME   Override this agent's name
+  CLAUDIO_STATE_DIR    State directory (default: /tmp/claudio)
 
-Quick test (two terminals):
-  term1$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio start alice
-  term2$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=bob   claudio start bob
-  term1$ claudio pair /tmp/cl/bob.sock          # paste in term1 while start is running? No —
-  # open a third terminal for client commands:
-  term3$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio pair /tmp/cl/bob.sock
-  term4$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=bob   claudio pair --approve alice
-  term3$ CLAUDIO_STATE_DIR=/tmp/cl CLAUDIO_AGENT_NAME=alice claudio send bob "hello"
+Quick start (two terminals):
+  term1$ claudio start alice
+  term2$ claudio start bob
+  term3$ CLAUDIO_AGENT_NAME=alice claudio pair /tmp/claudio/bob.sock
+  term4$ CLAUDIO_AGENT_NAME=bob   claudio pair --approve alice
+  term3$ CLAUDIO_AGENT_NAME=alice claudio send bob "hello"
+  term5$ claudio discover
 """
 
 
@@ -277,6 +323,8 @@ def main() -> None:
 
     if cmd == 'start':
         sys.exit(cmd_start(rest))
+    elif cmd == 'discover':
+        sys.exit(cmd_discover(rest))
     elif cmd == 'pair':
         sys.exit(cmd_pair(rest))
     elif cmd == 'peers':
