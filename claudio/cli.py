@@ -15,7 +15,7 @@ import sys
 import time
 from typing import Optional
 
-from .agent import DEFAULT_STATE_DIR, _next_session_name, send_to, socket_path, start as _start
+from .agent import DEFAULT_STATE_DIR, _RECV_BUF, _next_session_name, send_to, socket_path, start as _start
 from .peers import Peers, peers_path
 
 

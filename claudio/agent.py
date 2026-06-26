@@ -14,6 +14,7 @@ from collections import deque
 from typing import Callable, Optional
 
 POLL_INTERVAL = 0.5  # seconds between idle checks
+_RECV_BUF = 65536
 # Default to /tmp/claudio — ephemeral, no cleanup needed, no project dir pollution.
 # cmux agents override this by setting CLAUDIO_STATE_DIR to their homedir.
 DEFAULT_STATE_DIR = os.path.join(os.path.abspath(os.sep), 'tmp', 'claudio')
@@ -54,7 +55,7 @@ def send_to(sock_path: str, message: dict) -> dict:
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(sock_path)
     s.sendall(json.dumps(message).encode())
-    ack = s.recv(65536)
+    ack = s.recv(_RECV_BUF)
     s.close()
     return json.loads(ack) if ack else {}
 
@@ -142,7 +143,7 @@ def start(
 
     def handle_connection(conn: socket.socket) -> None:
         try:
-            data = conn.recv(65536)
+            data = conn.recv(_RECV_BUF)
             if not data:
                 conn.close()
                 return

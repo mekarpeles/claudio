@@ -299,5 +299,128 @@ class TestPairAndMessage(unittest.TestCase):
         self.assertIn('pong from bob', [m.get('body') for m in alice_delivered])
 
 
+class TestPairRequestDisconnectBeforeApproval(unittest.TestCase):
+    """Requester disconnects before approval — daemon must not hang or leak."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_requester_disconnects_before_approval(self):
+        """If the requester closes the connection before approval the daemon keeps running."""
+        import socket as _socket
+        import json
+
+        name = f'bob-{uuid4().hex[:8]}'
+        sender_name = f'alice-{uuid4().hex[:8]}'
+        sender_sock_path = socket_path(sender_name, self.tmpdir)
+
+        _run_agent(name, lambda msg: None, lambda: True, self.tmpdir)
+        bob_sock = socket_path(name, self.tmpdir)
+
+        # Send pair_request then immediately close — simulating a disconnect
+        s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        s.connect(bob_sock)
+        s.sendall(json.dumps({
+            '_claudio': 'pair_request',
+            'name': sender_name,
+            'socket': sender_sock_path,
+        }).encode())
+        s.close()  # disconnect before approval
+
+        # Give the daemon time to notice
+        time.sleep(0.3)
+
+        # Daemon must still accept new connections and respond normally
+        resp = claudio.send_to(bob_sock, {'_claudio': 'pair_approve', 'name': 'nobody'})
+        self.assertFalse(resp.get('ok'), "daemon should still be responsive after requester disconnect")
+
+
+class TestPairRequestDuplicateNameSupersedes(unittest.TestCase):
+    """Second pair_request with the same name supersedes the first."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_duplicate_name_first_gets_superseded_error(self):
+        """When a second pair_request arrives with the same name the first gets an error response."""
+        import socket as _socket
+        import json
+
+        name = f'bob-{uuid4().hex[:8]}'
+        sender_name = f'alice-{uuid4().hex[:8]}'
+        sender_sock_path = socket_path(sender_name, self.tmpdir)
+
+        _run_agent(name, lambda msg: None, lambda: True, self.tmpdir)
+        bob_sock = socket_path(name, self.tmpdir)
+
+        first_result = []
+        first_connected = threading.Event()
+
+        def send_first():
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            s.connect(bob_sock)
+            s.sendall(json.dumps({
+                '_claudio': 'pair_request',
+                'name': sender_name,
+                'socket': sender_sock_path,
+            }).encode())
+            first_connected.set()
+            s.settimeout(5)
+            try:
+                data = s.recv(65536)
+                first_result.append(json.loads(data) if data else {})
+            except _socket.timeout:
+                first_result.append({'timeout': True})
+            finally:
+                s.close()
+
+        t = threading.Thread(target=send_first, daemon=True)
+        t.start()
+
+        # Wait until first connection is established before sending second
+        first_connected.wait(timeout=3)
+        time.sleep(0.1)  # ensure the first request is stored in pending_pairs
+
+        # Send a second pair_request with the same sender name
+        second_result = []
+
+        def send_second():
+            s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+            s.connect(bob_sock)
+            s.sendall(json.dumps({
+                '_claudio': 'pair_request',
+                'name': sender_name,
+                'socket': sender_sock_path,
+            }).encode())
+            s.settimeout(5)
+            try:
+                data = s.recv(65536)
+                second_result.append(json.loads(data) if data else {})
+            except _socket.timeout:
+                second_result.append({'timeout': True})
+            finally:
+                s.close()
+
+        t2 = threading.Thread(target=send_second, daemon=True)
+        t2.start()
+
+        # The first connection should receive a 'superseded' error
+        t.join(timeout=5)
+        self.assertFalse(t.is_alive(), "first pair_request thread should have unblocked with error")
+        self.assertTrue(first_result, "first requester should have received a response")
+        resp = first_result[0]
+        self.assertFalse(resp.get('ok'), f"first requester should get ok=False, got: {resp}")
+        self.assertIn('superseded', resp.get('error', ''), f"error should mention 'superseded', got: {resp}")
+
+        # Clean up second thread
+        t2.join(timeout=0.5)
+
+
 if __name__ == '__main__':
     unittest.main()

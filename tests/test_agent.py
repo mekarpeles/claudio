@@ -94,5 +94,58 @@ class TestDelivery(unittest.TestCase):
         self.assertIn('bob', senders)
 
 
+class TestTOCTOURace(unittest.TestCase):
+    """Regression tests for the TOCTOU race in the delivery loop.
+
+    The delivery loop checks `if not queue` under the lock, releases it,
+    checks is_idle(), then re-acquires and calls popleft(). A concurrent
+    thread can drain the queue in that window, causing IndexError.
+    """
+
+    def test_no_crash_under_concurrent_senders(self):
+        """All messages queued before the idle gate opens must be delivered."""
+        delivered = []
+        idle = threading.Event()
+        ready = threading.Event()
+        _run_agent('t-toctou-crash', lambda msg: delivered.append(msg), lambda: idle.is_set(), ready)
+
+        N = 10
+        for i in range(N):
+            claudio.send('t-toctou-crash', {'body': str(i)}, state_dir=STATE_DIR)
+
+        idle.set()
+        deadline = time.time() + N * 1.5 + 3
+        while time.time() < deadline and len(delivered) < N:
+            time.sleep(0.1)
+
+        self.assertEqual(len(delivered), N,
+            f"Expected {N} deliveries, got {len(delivered)}: {[m['body'] for m in delivered]}")
+
+    def test_no_message_drop_under_concurrent_senders(self):
+        """N threads sending simultaneously must each see their message delivered."""
+        delivered = []
+        ready = threading.Event()
+        _run_agent('t-toctou-drop', lambda msg: delivered.append(msg['body']), lambda: True, ready)
+
+        N = 10
+        barrier = threading.Barrier(N)
+
+        def sender(i):
+            barrier.wait()
+            claudio.send('t-toctou-drop', {'body': str(i)}, state_dir=STATE_DIR)
+
+        threads = [threading.Thread(target=sender, args=(i,)) for i in range(N)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        deadline = time.time() + N * 1.5 + 3
+        while time.time() < deadline and len(delivered) < N:
+            time.sleep(0.1)
+
+        self.assertEqual(sorted(delivered), [str(i) for i in range(N)])
+
+
 if __name__ == '__main__':
     unittest.main()
