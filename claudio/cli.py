@@ -183,14 +183,18 @@ def cmd_pair_initiate(args: list, state_dir: Optional[str] = None, agent_name: O
     agent_name = agent_name or _agent_name()
 
     if not args:
-        print("usage: claudio pair <socket>", file=sys.stderr)
+        print("usage: claudio pair <name|socket>", file=sys.stderr)
         return 1
 
-    target_socket = os.path.expanduser(args[0])
+    target = os.path.expanduser(args[0])
+    # Resolve a bare name (e.g. '0', 'alice') to its socket path by convention.
+    if not target.startswith('/') and not target.startswith('~'):
+        target_socket = os.path.join(state_dir, f'{target}.sock')
+    else:
+        target_socket = target
 
     if not agent_name:
-        print("claudio: CLAUDIO_AGENT_NAME or CMUX_SESSION_NAME must be set", file=sys.stderr)
-        return 1
+        agent_name = _next_session_name(state_dir)
 
     own_sock = socket_path(agent_name, state_dir)
 
@@ -293,7 +297,7 @@ claudio — peer-to-peer messaging for Claude Code agents
 Usage:
   claudio [<name>]                   Start a daemon (auto-names 0, 1, 2... if omitted)
   claudio discover                   List all running claudio agents
-  claudio pair <socket>              Pair with the agent at <socket> (blocks until approved)
+  claudio pair <name|socket>         Pair with the agent named <name> or at <socket> (blocks until approved)
   claudio pair --approve <name>      Approve a pending pair request from <name>
   claudio peers                      List current peers
   claudio send <name|socket> <msg>   Send a message to a peer
