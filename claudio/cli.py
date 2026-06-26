@@ -46,7 +46,8 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> O
         sock = peers.get(target)
         if sock:
             return sock
-    return None
+    # Fall back to socket-path convention: bare name → {state_dir}/{name}.sock
+    return os.path.join(state_dir, f'{target}.sock')
 
 
 def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
