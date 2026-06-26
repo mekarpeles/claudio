@@ -74,9 +74,10 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
             return
         sender = msg.get('from', 'claudio')
         body = msg.get('body', repr(msg))
-        text = f'[{sender}@claudio]: {body}\r'
         try:
-            os.write(fd, text.encode())
+            os.write(fd, f'[{sender}@claudio]: {body}'.encode())
+            time.sleep(0.05)
+            os.write(fd, b'\r')
         except OSError:
             pass
 
