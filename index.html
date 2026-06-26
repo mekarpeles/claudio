@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claudio — messaging for Claude Code agents</title>
+<meta name="description" content="ClaudIO gives Claude Code agents the ability to message each other." />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Claudio" />
+<meta property="og:description" content="Claudio gives Claude Code agents the ability to message each other." />
+<meta property="og:url" content="https://tryclaudio.com" />
+<meta property="og:image" content="https://tryclaudio.com/claudio.png" />
+<meta property="og:image:alt" content="Claudio logo" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://tryclaudio.com/claudio.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg:        #ffffff;
+    --bg-soft:   #f6f8fa;
+    --panel:     #f6f8fa;
+    --panel-2:   #eef0f3;
+    --border:    #d0d7de;
+    --border-2:  #c6cdd4;
+    --text:      #1f2328;
+    --muted:     #656d76;
+    --muted-2:   #9198a1;
+    --green:     #1a7f37;
+    --green-soft:#2da44e;
+    --accent:    #0969da;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ---------- nav ---------- */
+  nav {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 20px 0;
+  }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
+  .nav-links a { color: var(--muted); font-size: 0.9rem; font-weight: 500; font-family: var(--mono); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .nav-links a.active { color: var(--text); font-weight: 700; }
+
+  /* ---------- hero ---------- */
+  .hero {
+    text-align: center;
+    padding: 64px 0 56px;
+  }
+  .hero-logo {
+    height: 200px;
+    width: auto;
+    display: block;
+    margin: 0 auto;
+  }
+  .hero h1 {
+    font-size: 5rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: -20px 0 14px;
+    color: var(--text);
+  }
+  .hero h1 .ast-hi { color: #f06923; position: relative; top: -.6rem; font-size: 3rem; }
+  .hero h1 .ast-lo { color: #f06923; font-size: 3rem; position: relative; top: .6rem; left: -1.5rem; }
+  .hero h1 .io     { margin-left: -1.4rem; }
+  .hero p.tagline {
+    font-size: 1.18rem;
+    color: var(--muted);
+    margin: 0 auto 36px;
+  }
+
+  /* inline code in prose */
+  p > code, h2 > code, li > code {
+    font-family: var(--mono);
+    font-weight: bold;
+    color: var(--text);
+  }
+  p > code.t, h2 > code.t, li > code.t {
+    color: #ef661d;
+  }
+
+  /* install line */
+  .install {
+    display: flex;
+    align-items: stretch;
+    max-width: 560px;
+    margin: 0 auto 24px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .install code {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 0.84rem;
+    color: var(--text);
+    padding: 12px 16px;
+    text-align: left;
+    white-space: nowrap;
+    overflow-x: auto;
+    display: flex;
+    align-items: center;
+  }
+  .install code::before {
+    content: "$";
+    color: var(--muted-2);
+    margin-right: 10px;
+  }
+  .copy-btn {
+    border: none;
+    border-left: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 0 16px;
+    cursor: pointer;
+    transition: color .15s, background .15s;
+    white-space: nowrap;
+  }
+  .copy-btn:hover { color: var(--green); background: var(--border); }
+  .copy-btn.copied { color: var(--green); }
+
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    padding: 10px 20px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .btn:hover { text-decoration: none; }
+  .btn-primary {
+    background: var(--text);
+    color: #fff;
+    border-color: var(--text);
+  }
+  .btn-primary:hover { background: #000; border-color: #000; }
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--border-2);
+    color: var(--text);
+  }
+  .btn-ghost:hover { border-color: var(--muted); background: var(--bg-soft); }
+  .btn svg { width: 16px; height: 16px; }
+
+  /* ---------- sections ---------- */
+  section { padding: 48px 0; border-top: 1px solid var(--border); }
+  .section-head { margin-bottom: 28px; }
+  .section-head h2 { margin: 0 0 8px; }
+  .section-head p { color: var(--muted); max-width: 600px; margin: 0; font-size: 1rem; }
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 10px;
+    color: var(--text);
+  }
+
+  /* ---------- terminal demo ---------- */
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .term {
+    background: #1b1f23;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    background: #24292f;
+    border-bottom: 1px solid #30363d;
+  }
+  .term-bar .lights { display: flex; gap: 6px; }
+  .term-bar .lights span { width: 11px; height: 11px; border-radius: 50%; }
+  .l-r { background: #ff5f56; }
+  .l-y { background: #ffbd2e; }
+  .l-g { background: #27c93f; }
+  .term-bar .name {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: #8b949e;
+  }
+  .term-body {
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.65;
+    padding: 14px 14px 16px;
+    min-height: 320px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #c9d1d9;
+    flex: 1;
+  }
+  .term-body .prompt { color: #56d364; }
+  .term-body .ok { color: #56d364; }
+  .term-body .sys { color: #79c0ff; }
+  .term-body .msg { color: #d2a8ff; }
+  .term-body .dim { color: #6e7681; }
+  .cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1em;
+    background: #56d364;
+    vertical-align: text-bottom;
+    margin-left: 1px;
+    animation: blink 1s steps(2,start) infinite;
+  }
+  @keyframes blink { to { visibility: hidden; } }
+  .demo-replay {
+    text-align: center;
+    margin-top: 16px;
+  }
+  .demo-replay button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .demo-replay button:hover { color: var(--text); border-color: var(--muted); }
+
+  /* ---------- generic code block ---------- */
+  .code-block {
+    background: #1b1f23;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.7;
+    padding: 16px 18px;
+    overflow-x: auto;
+    color: #c9d1d9;
+  }
+  .code-block .prompt { color: #56d364; }
+  .code-block .prompt::before { content: "$ "; color: #6e7681; }
+  .code-block .comment { color: #6e7681; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: start;
+  }
+  .two-col .prose p { color: var(--muted); margin: 0 0 14px; font-size: 0.97rem; }
+  .two-col .prose p:last-child { margin-bottom: 0; }
+  .two-col .prose a { font-size: 0.9rem; }
+
+  /* ---------- experiment cards ---------- */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 18px;
+  }
+  .card .tag {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--green);
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: inline-block;
+  }
+  .card h3 {
+    font-size: 0.97rem;
+    margin: 0 0 6px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .card p { color: var(--muted); font-size: 0.88rem; margin: 0; }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 0 48px;
+  }
+  footer .foot-links {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  footer .foot-links a { color: var(--muted); font-size: 0.88rem; }
+  footer .foot-links a:hover { color: var(--text); text-decoration: none; }
+  footer .license {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted-2);
+  }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 680px) {
+    .demo-grid { grid-template-columns: 1fr; }
+    .two-col { grid-template-columns: 1fr; gap: 24px; }
+    .term-body { min-height: 260px; }
+    .hero h1 { font-size: 3.5rem; }
+    .hero-logo { height: 140px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="nav-links">
+      <a class="active" href="https://github.com/mekarpeles/claudio" target="_blank" rel="noopener">claudio</a>
+      <a href="https://github.com/mekarpeles/cmux#readme" target="_blank" rel="noopener">cmux</a>
+      <a href="https://github.com/mekarpeles/cq" target="_blank" rel="noopener">cq</a>
+    </div>
+  </nav>
+</div>
+
+<!-- ===================== HERO ===================== -->
+<div class="wrap">
+  <header class="hero">
+    <img src="logo.png" alt="Claudio" class="hero-logo">
+    <h1>Claud<span class="ast-hi">*</span><span class="ast-lo">*</span><span class="io">IO</span></h1>
+    <p class="tagline"><code class="t">Claudio</code> lets Claude Code sessions message each other.</p>
+
+    <div class="install">
+      <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/mekarpeles/cmux/main/install.sh | bash</code>
+      <button class="copy-btn" id="copy-btn" aria-label="Copy install command">Copy</button>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/mekarpeles/claudio" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        GitHub
+      </a>
+      <a class="btn btn-ghost" href="#demo">Demo</a>
+    </div>
+  </header>
+</div>
+
+<!-- ===================== TERMINAL DEMO ===================== -->
+<section id="demo">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>How it works</h2>
+      <p><code class="t">Claudio</code> wraps around Claude Code sessions and adds the ability to <code>discover</code> other running agents, <code>pair</code> with them, and <code>send</code> them messages.</p>
+    </div>
+
+    <div class="demo-grid">
+      <div class="term">
+        <div class="term-bar">
+          <div class="lights"><span class="l-r"></span><span class="l-y"></span><span class="l-g"></span></div>
+          <div class="name">alice</div>
+        </div>
+        <div class="term-body" id="term-alice"></div>
+      </div>
+      <div class="term">
+        <div class="term-bar">
+          <div class="lights"><span class="l-r"></span><span class="l-y"></span><span class="l-g"></span></div>
+          <div class="name">bob</div>
+        </div>
+        <div class="term-body" id="term-bob"></div>
+      </div>
+    </div>
+
+    <div class="demo-replay">
+      <button id="replay-btn">↻ replay</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== WORKS WITH CMUX ===================== -->
+<section id="cmux">
+  <div class="wrap">
+    <h2>Orchestrate <code class="t">claudio</code> teams using <code class="t">cmux</code></h2>
+    <div class="two-col">
+      <div class="prose">
+        <p><code class="t">cmux</code> is a multiplexer that enables you to easily run multiple concurrent, communicating <code class="t">claudio</code> agents using tmux. It has a CLI that feels like <code>tmux</code> meets <code>docker</code>. You can manage Claude sessions in tmux windows, spin up new agents, and have agents message each other directly in real time.</p>
+      </div>
+      <div>
+        <div class="term" id="term-cmux-wrap">
+          <div class="term-bar">
+            <div class="lights"><span class="l-r"></span><span class="l-y"></span><span class="l-g"></span></div>
+            <div class="name">~/projects</div>
+          </div>
+          <div class="term-body" id="term-cmux"></div>
+        </div>
+        <div class="demo-replay" style="margin-top:12px">
+          <button id="cmux-replay-btn">↻ replay</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CQ ===================== -->
+<section id="cq">
+  <div class="wrap">
+    <h2>Per-agent TODOs with <code class="t">cq</code></h2>
+    <div class="two-col">
+      <div>
+        <div class="term" id="term-cq-wrap">
+          <div class="term-bar">
+            <div class="lights"><span class="l-r"></span><span class="l-y"></span><span class="l-g"></span></div>
+            <div class="name">alice</div>
+          </div>
+          <div class="term-body" id="term-cq"></div>
+        </div>
+        <div class="demo-replay" style="margin-top:12px">
+          <button id="cq-replay-btn">↻ replay</button>
+        </div>
+      </div>
+      <div class="prose">
+        <p><code class="t">cq</code> is a lightweight task queue designed for <code class="t">claudio</code> agents. It is based on <code>gh</code> and implements GitHub's Issues API locally as <code>.cq/</code> on disk. <code class="t">cq</code> works without <code class="t">claudio</code> but <code class="t">claudio</code> and <code class="t">cmux</code> offer utilities to make these tools work seamlessly together.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== COMMANDS ===================== -->
+<section id="commands">
+  <div class="wrap">
+    <div class="section-head">
+      <h2>Commands</h2>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <span class="tag">claudio discover</span>
+        <h3>List running agents</h3>
+        <p>Scans the state directory and shows all live agents with their names and socket paths.</p>
+      </div>
+      <div class="card">
+        <span class="tag">claudio pair &lt;socket&gt;</span>
+        <h3>Pair with an agent</h3>
+        <p>Exchange socket addresses in a direct handshake. No registry required.</p>
+      </div>
+      <div class="card">
+        <span class="tag">claudio send &lt;name&gt; &lt;msg&gt;</span>
+        <h3>Send a message</h3>
+        <p>Delivers to any paired agent by name, or to any socket path directly.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== FOOTER ===================== -->
+<footer>
+  <div class="wrap">
+    <div class="foot-links">
+      <a href="https://github.com/mekarpeles/claudio" target="_blank" rel="noopener">claudio</a>
+      <a href="https://github.com/mekarpeles/cmux#readme" target="_blank" rel="noopener">cmux</a>
+      <a href="#demo">Demo</a>
+    </div>
+    <div class="license">MIT license</div>
+  </div>
+</footer>
+
+<script>
+/* ---------- copy button ---------- */
+(function () {
+  var btn = document.getElementById("copy-btn");
+  var cmd = document.getElementById("install-cmd").textContent.trim();
+  btn.addEventListener("click", function () {
+    navigator.clipboard.writeText(cmd).then(function () {
+      btn.textContent = "Copied ✓";
+      btn.classList.add("copied");
+      setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1600);
+    });
+  });
+})();
+
+/* ---------- terminal typewriter demo ---------- */
+(function () {
+  var alice = document.getElementById("term-alice");
+  var bob   = document.getElementById("term-bob");
+
+  var P = '<span class="prompt">$ </span>';
+  var steps = [
+    { pane: "a", type: "type",  html: P + 'claudio start alice' },
+    { pane: "b", type: "type",  html: P + 'claudio start bob' },
+    { pane: "a", type: "print", html: '<span class="ok">claudio: session \'alice\' listening at /tmp/claudio/alice.sock</span>', wait: 250 },
+    { pane: "b", type: "print", html: '<span class="ok">claudio: session \'bob\' listening at /tmp/claudio/bob.sock</span>', wait: 250 },
+
+    { pane: "a", type: "type",  html: P + 'claudio pair /tmp/claudio/bob.sock', wait: 700 },
+
+    { pane: "b", type: "print", html: '<span class="sys">[claudio]: alice wants to pair.</span>', wait: 600 },
+    { pane: "b", type: "print", html: '<span class="sys">           Run: claudio pair --approve alice</span>' },
+
+    { pane: "b", type: "type",  html: P + 'claudio pair --approve alice', wait: 700 },
+    { pane: "b", type: "print", html: '<span class="ok">claudio: paired with alice</span>', wait: 300 },
+    { pane: "a", type: "print", html: '<span class="ok">claudio: paired with bob</span>' },
+
+    { pane: "a", type: "type",  html: P + 'claudio send bob "hey, did you finish the refactor?"', wait: 800 },
+    { pane: "b", type: "print", html: '<span class="msg">[alice]: hey, did you finish the refactor?</span>', wait: 500 },
+  ];
+
+  var CHAR_MS = 22;
+  var LINE_MS = 360;
+  var LOOP_PAUSE = 4200;
+  var timers = [];
+  var running = false;
+
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+  function reset() {
+    alice.innerHTML = '<span class="cursor"></span>';
+    bob.innerHTML   = '<span class="cursor"></span>';
+  }
+  function paneEl(p) { return p === "a" ? alice : bob; }
+
+  function ensureCursor(el) {
+    if (!el.querySelector(".cursor")) {
+      var c = document.createElement("span"); c.className = "cursor"; el.appendChild(c);
+    }
+  }
+  function removeCursor(el) { var c = el.querySelector(".cursor"); if (c) c.remove(); }
+
+  function run(idx) {
+    if (idx >= steps.length) { timers.push(setTimeout(function () { start(); }, LOOP_PAUSE)); return; }
+    var step = steps[idx];
+    var el = paneEl(step.pane);
+    timers.push(setTimeout(function () {
+      removeCursor(alice); removeCursor(bob);
+      var line = document.createElement("div");
+      el.appendChild(line);
+      if (step.type === "print") {
+        line.innerHTML = step.html;
+        ensureCursor(el);
+        timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS));
+      } else {
+        typeInto(line, el, step.html, function () { run(idx + 1); });
+      }
+    }, step.wait || 0));
+  }
+
+  function typeInto(line, el, html, done) {
+    var tmp = document.createElement("div"); tmp.innerHTML = html;
+    var promptSpan = tmp.querySelector(".prompt");
+    var promptHTML = promptSpan ? promptSpan.outerHTML : "";
+    if (promptSpan) promptSpan.remove();
+    var text = tmp.textContent;
+    var i = 0;
+    function tick() {
+      line.innerHTML = promptHTML + escapeHtml(text.slice(0, i));
+      var c = line.querySelector(".cursor"); if (c) c.remove();
+      var cur = document.createElement("span"); cur.className = "cursor"; line.appendChild(cur);
+      i++;
+      if (i <= text.length) { timers.push(setTimeout(tick, CHAR_MS)); }
+      else { removeCursor(line); ensureCursor(el); timers.push(setTimeout(done, LINE_MS)); }
+    }
+    tick();
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function start() { clearTimers(); reset(); run(0); }
+
+  document.getElementById("replay-btn").addEventListener("click", start);
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting && !running) { running = true; start(); io.disconnect(); }
+    });
+  }, { threshold: 0.3 });
+  io.observe(document.getElementById("demo"));
+
+  reset();
+})();
+
+/* ---------- cmux demo ---------- */
+(function () {
+  var el = document.getElementById("term-cmux");
+  if (!el) return;
+
+  var P = '<span class="prompt">$ </span>';
+  var steps = [
+    { type: "type",  html: P + "cmux ls" },
+    { type: "print", html: '<span class="dim">NAME     STATUS    UPTIME</span>', wait: 200 },
+    { type: "print", html: 'alice    <span class="ok">running</span>   2h 14m' },
+    { type: "print", html: 'bob      <span class="ok">running</span>     47m' },
+    { type: "print", html: 'carol    <span class="ok">running</span>     12m' },
+    { type: "print", html: '', wait: 500 },
+    { type: "type",  html: P + 'cmux send alice "can you review PR #42?"', wait: 400 },
+    { type: "print", html: '<span class="ok">✓ sent → alice</span>', wait: 300 },
+    { type: "print", html: '', wait: 300 },
+    { type: "type",  html: P + 'cmux send bob "coordinate with alice on the review"', wait: 400 },
+    { type: "print", html: '<span class="ok">✓ sent → bob</span>', wait: 300 },
+  ];
+
+  var CHAR_MS = 22, LINE_MS = 360, LOOP_PAUSE = 4200;
+  var timers = [], running = false;
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+  function reset() { el.innerHTML = '<span class="cursor"></span>'; }
+  function ensureCursor() { if (!el.querySelector(".cursor")) { var c = document.createElement("span"); c.className = "cursor"; el.appendChild(c); } }
+  function removeCursor() { var c = el.querySelector(".cursor"); if (c) c.remove(); }
+  function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function run(idx) {
+    if (idx >= steps.length) { timers.push(setTimeout(start, LOOP_PAUSE)); return; }
+    var step = steps[idx];
+    timers.push(setTimeout(function () {
+      removeCursor();
+      var line = document.createElement("div");
+      el.appendChild(line);
+      if (step.type === "print") {
+        line.innerHTML = step.html;
+        ensureCursor();
+        timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS));
+      } else {
+        var tmp = document.createElement("div"); tmp.innerHTML = step.html;
+        var ps = tmp.querySelector(".prompt");
+        var ph = ps ? ps.outerHTML : ""; if (ps) ps.remove();
+        var text = tmp.textContent, i = 0;
+        (function tick() {
+          line.innerHTML = ph + escapeHtml(text.slice(0, i));
+          var c = line.querySelector(".cursor"); if (c) c.remove();
+          var cur = document.createElement("span"); cur.className = "cursor"; line.appendChild(cur);
+          i++;
+          if (i <= text.length) timers.push(setTimeout(tick, CHAR_MS));
+          else { removeCursor(); ensureCursor(); timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS)); }
+        })();
+      }
+    }, step.wait || 0));
+  }
+
+  function start() { clearTimers(); reset(); run(0); }
+  document.getElementById("cmux-replay-btn").addEventListener("click", start);
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting && !running) { running = true; start(); io.disconnect(); } });
+  }, { threshold: 0.3 });
+  io.observe(document.getElementById("term-cmux-wrap"));
+  reset();
+})();
+
+/* ---------- cq demo ---------- */
+(function () {
+  var el = document.getElementById("term-cq");
+  if (!el) return;
+
+  var P = '<span class="prompt">$ </span>';
+  var steps = [
+    { type: "type",  html: P + 'cq issue create -t "review PR #42"' },
+    { type: "print", html: '<span class="ok">#1</span>  review PR #42', wait: 200 },
+    { type: "print", html: '', wait: 400 },
+    { type: "type",  html: P + 'cq issue comment 1 "left notes on the diff"', wait: 300 },
+    { type: "print", html: '<span class="ok">comment added on #1</span>', wait: 200 },
+    { type: "print", html: '', wait: 400 },
+    { type: "type",  html: P + 'cq issue list', wait: 300 },
+    { type: "print", html: '<span class="dim">#   TITLE              STATUS</span>', wait: 200 },
+    { type: "print", html: '<span class="ok">1</span>   review PR #42     open' },
+    { type: "print", html: '', wait: 400 },
+    { type: "type",  html: P + 'cq issue close 1', wait: 300 },
+    { type: "print", html: '<span class="ok">closed #1</span>', wait: 200 },
+  ];
+
+  var CHAR_MS = 22, LINE_MS = 360, LOOP_PAUSE = 4200;
+  var timers = [], running = false;
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+  function reset() { el.innerHTML = '<span class="cursor"></span>'; }
+  function ensureCursor() { if (!el.querySelector(".cursor")) { var c = document.createElement("span"); c.className = "cursor"; el.appendChild(c); } }
+  function removeCursor() { var c = el.querySelector(".cursor"); if (c) c.remove(); }
+  function escapeHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  function run(idx) {
+    if (idx >= steps.length) { timers.push(setTimeout(start, LOOP_PAUSE)); return; }
+    var step = steps[idx];
+    timers.push(setTimeout(function () {
+      removeCursor();
+      var line = document.createElement("div");
+      el.appendChild(line);
+      if (step.type === "print") {
+        line.innerHTML = step.html;
+        ensureCursor();
+        timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS));
+      } else {
+        var tmp = document.createElement("div"); tmp.innerHTML = step.html;
+        var ps = tmp.querySelector(".prompt");
+        var ph = ps ? ps.outerHTML : ""; if (ps) ps.remove();
+        var text = tmp.textContent, i = 0;
+        (function tick() {
+          line.innerHTML = ph + escapeHtml(text.slice(0, i));
+          var c = line.querySelector(".cursor"); if (c) c.remove();
+          var cur = document.createElement("span"); cur.className = "cursor"; line.appendChild(cur);
+          i++;
+          if (i <= text.length) timers.push(setTimeout(tick, CHAR_MS));
+          else { removeCursor(); ensureCursor(); timers.push(setTimeout(function () { run(idx + 1); }, LINE_MS)); }
+        })();
+      }
+    }, step.wait || 0));
+  }
+
+  function start() { clearTimers(); reset(); run(0); }
+  document.getElementById("cq-replay-btn").addEventListener("click", start);
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting && !running) { running = true; start(); io.disconnect(); } });
+  }, { threshold: 0.3 });
+  io.observe(document.getElementById("term-cq-wrap"));
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -176,5 +176,128 @@ class TestPairEndToEnd(unittest.TestCase):
                       f"bob should have alice as peer; got {bob_result_peers}")
 
 
+class TestPairAndMessage(unittest.TestCase):
+    """Full e2e: two ephemeral claudio agents pair via CLI, then exchange messages."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_pair_then_send(self):
+        """Alice pairs with bob via CLI, bob approves via CLI, alice sends a message bob receives."""
+        from claudio.cli import cmd_pair, cmd_send
+
+        alice_name = f'alice-{uuid4().hex[:8]}'
+        bob_name = f'bob-{uuid4().hex[:8]}'
+
+        bob_delivered = []
+
+        _run_agent(alice_name, lambda msg: None, lambda: True, self.tmpdir)
+        _run_agent(bob_name, lambda msg: bob_delivered.append(msg), lambda: True, self.tmpdir)
+
+        bob_sock = socket_path(bob_name, self.tmpdir)
+
+        # Alice initiates pairing in a thread — blocks until bob approves
+        alice_rc = []
+        def alice_pair():
+            alice_rc.append(cmd_pair([bob_sock], state_dir=self.tmpdir, agent_name=alice_name))
+        t = threading.Thread(target=alice_pair, daemon=True)
+        t.start()
+
+        # Wait for bob's notification
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if bob_delivered:
+                break
+            time.sleep(0.05)
+        self.assertTrue(bob_delivered, 'bob should receive pair notification')
+
+        # Bob approves via CLI (sends pair_approve to his own daemon socket)
+        self.assertEqual(
+            cmd_pair(['--approve', alice_name], state_dir=self.tmpdir, agent_name=bob_name),
+            0, 'bob approve should return 0',
+        )
+
+        # Alice's thread unblocks
+        t.join(timeout=5)
+        self.assertFalse(t.is_alive(), "alice's pair thread should have completed")
+        self.assertEqual(alice_rc[0], 0, 'alice cmd_pair should return 0')
+
+        # Both peers recorded
+        alice_peers = Peers(peers_path(alice_name, self.tmpdir)).all()
+        bob_peers = Peers(peers_path(bob_name, self.tmpdir)).all()
+        self.assertIn(bob_name, alice_peers, f'alice peers: {alice_peers}')
+        self.assertIn(alice_name, bob_peers, f'bob peers: {bob_peers}')
+
+        # Alice sends a message to bob by name — resolves via alice's peers file
+        self.assertEqual(
+            cmd_send([bob_name, 'hello from alice'], state_dir=self.tmpdir, agent_name=alice_name),
+            0, 'cmd_send should return 0',
+        )
+
+        # Wait for delivery
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            if len(bob_delivered) >= 2:
+                break
+            time.sleep(0.1)
+
+        payloads = [m.get('body') for m in bob_delivered]
+        self.assertIn('hello from alice', payloads, f'bob received: {payloads}')
+
+    def test_bidirectional_messaging(self):
+        """After pairing, both agents can send to each other by name."""
+        from claudio.cli import cmd_pair, cmd_send
+
+        alice_name = f'alice-{uuid4().hex[:8]}'
+        bob_name = f'bob-{uuid4().hex[:8]}'
+
+        alice_delivered = []
+        bob_delivered = []
+
+        _run_agent(alice_name, lambda msg: alice_delivered.append(msg), lambda: True, self.tmpdir)
+        _run_agent(bob_name, lambda msg: bob_delivered.append(msg), lambda: True, self.tmpdir)
+
+        bob_sock = socket_path(bob_name, self.tmpdir)
+
+        # Pair
+        t = threading.Thread(
+            target=cmd_pair,
+            args=([bob_sock],),
+            kwargs=dict(state_dir=self.tmpdir, agent_name=alice_name),
+            daemon=True,
+        )
+        t.start()
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if bob_delivered:
+                break
+            time.sleep(0.05)
+
+        cmd_pair(['--approve', alice_name], state_dir=self.tmpdir, agent_name=bob_name)
+        t.join(timeout=5)
+
+        # Alice → Bob
+        cmd_send([bob_name, 'ping from alice'], state_dir=self.tmpdir, agent_name=alice_name)
+
+        # Bob → Alice
+        cmd_send([alice_name, 'pong from bob'], state_dir=self.tmpdir, agent_name=bob_name)
+
+        # Wait for both deliveries
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            alice_bodies = [m.get('body') for m in alice_delivered]
+            bob_bodies = [m.get('body') for m in bob_delivered]
+            if 'ping from alice' in bob_bodies and 'pong from bob' in alice_bodies:
+                break
+            time.sleep(0.1)
+
+        self.assertIn('ping from alice', [m.get('body') for m in bob_delivered])
+        self.assertIn('pong from bob', [m.get('body') for m in alice_delivered])
+
+
 if __name__ == '__main__':
     unittest.main()
