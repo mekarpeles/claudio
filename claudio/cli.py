@@ -2,7 +2,7 @@
 claudio CLI — peer management and message sending commands.
 
 Commands:
-    claudio start [<name>]             Start a daemon (name optional, auto-assigned if omitted)
+    claudio [<name>]                   Start a daemon (name optional, auto-assigned if omitted)
     claudio discover                   List all running claudio agents
     claudio pair <socket>              Initiate pairing (blocks until approved, 5min timeout)
     claudio pair --approve <name>      Approve a pending pair request from <name>
@@ -291,7 +291,7 @@ USAGE = """\
 claudio — peer-to-peer messaging for Claude Code agents
 
 Usage:
-  claudio start [<name>]             Start a daemon (auto-names 0, 1, 2... if omitted)
+  claudio [<name>]                   Start a daemon (auto-names 0, 1, 2... if omitted)
   claudio discover                   List all running claudio agents
   claudio pair <socket>              Pair with the agent at <socket> (blocks until approved)
   claudio pair --approve <name>      Approve a pending pair request from <name>
@@ -303,13 +303,16 @@ Environment:
   CLAUDIO_STATE_DIR    State directory (default: /tmp/claudio)
 
 Quick start (two terminals):
-  term1$ claudio start alice
-  term2$ claudio start bob
+  term1$ claudio alice
+  term2$ claudio bob
   term3$ CLAUDIO_AGENT_NAME=alice claudio pair /tmp/claudio/bob.sock
   term4$ CLAUDIO_AGENT_NAME=bob   claudio pair --approve alice
   term3$ CLAUDIO_AGENT_NAME=alice claudio send bob "hello"
   term5$ claudio discover
 """
+
+
+_SUBCOMMANDS = {'discover', 'pair', 'peers', 'send'}
 
 
 def main() -> None:
@@ -321,8 +324,11 @@ def main() -> None:
     cmd = args[0]
     rest = args[1:]
 
-    if cmd == 'start':
-        sys.exit(cmd_start(rest))
+    # 'start' kept as a silent alias
+    if cmd in ('start',) or cmd not in _SUBCOMMANDS:
+        # treat cmd as optional name: `claudio [name]` or `claudio start [name]`
+        name_args = rest if cmd == 'start' else args
+        sys.exit(cmd_start(name_args))
     elif cmd == 'discover':
         sys.exit(cmd_discover(rest))
     elif cmd == 'pair':
@@ -331,7 +337,3 @@ def main() -> None:
         sys.exit(cmd_peers(rest))
     elif cmd == 'send':
         sys.exit(cmd_send(rest))
-    else:
-        print(f"claudio: unknown command '{cmd}'", file=sys.stderr)
-        print(USAGE, file=sys.stderr)
-        sys.exit(1)

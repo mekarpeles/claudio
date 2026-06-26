@@ -4,6 +4,8 @@ A lightweight IO wrapper that gives a Claude Code session an inbox.
 
 claudio listens on a Unix socket for incoming messages, queues them, and delivers each one into the session via a `deliver` callback when `is_idle` returns True. It has no opinion about how messages are delivered or how idleness is detected — those are your callbacks.
 
+Sessions are **ephemeral by design**: there is no persistent registry. When a session stops, its socket is gone. If you need persistent named agents with stop/restart/resume, use [cmux](https://github.com/mekarpeles/cmux) which builds on top of claudio.
+
 ## Install
 
 ```bash
@@ -16,7 +18,47 @@ Or from source:
 pip install -e /path/to/claudio
 ```
 
-## Usage
+## CLI
+
+Start a session (name is optional; auto-assigns 0, 1, 2... like tmux if omitted):
+
+```bash
+claudio alice
+claudio          # auto-named
+```
+
+List all running sessions:
+
+```bash
+claudio discover
+```
+
+Pair two agents so they can address each other by name:
+
+```bash
+# alice initiates — blocks until bob approves
+CLAUDIO_AGENT_NAME=alice claudio pair /tmp/claudio/bob.sock
+
+# bob approves (in another terminal)
+CLAUDIO_AGENT_NAME=bob claudio pair --approve alice
+```
+
+Send a message:
+
+```bash
+CLAUDIO_AGENT_NAME=alice claudio send bob "hello"
+CLAUDIO_AGENT_NAME=alice claudio send /tmp/claudio/bob.sock "hello"
+```
+
+List peers for the current agent:
+
+```bash
+CLAUDIO_AGENT_NAME=alice claudio peers
+```
+
+Sockets live at `/tmp/claudio/<name>.sock` by default. Override with `CLAUDIO_STATE_DIR`.
+
+## Python API
 
 ```python
 import claudio
@@ -29,22 +71,29 @@ def is_idle() -> bool:
     # return True when the session is ready to receive
     return True
 
-claudio.run(name="myagent", deliver=deliver, is_idle=is_idle)
+claudio.run(name="alice", deliver=deliver, is_idle=is_idle)
 ```
 
-The agent's inbox is a Unix socket at `~/.claudio/<name>.sock`. Any process can write to it:
+`run()` blocks forever. Use `start()` for non-blocking:
 
 ```python
-import claudio
+name = claudio.start(name="alice", deliver=deliver, is_idle=is_idle)
+# name is "alice" (or auto-assigned if omitted)
+# daemon threads are running; calling thread continues
+```
 
-claudio.send("myagent", {"from": "alice", "body": "hello"})
+Send from any process:
+
+```python
+claudio.send("alice", {"from": "bob", "body": "hello"})
+claudio.send_to("/tmp/claudio/alice.sock", {"body": "direct"})
 ```
 
 ## How it works
 
-- `claudio.run()` starts a socket server in a background thread and enters the delivery loop.
+- `claudio.run()` / `claudio.start()` binds a Unix socket at `{state_dir}/{name}.sock` (default `/tmp/claudio/`) and starts three daemon threads: a socket server, a delivery loop, and a pair-request cleanup timer.
 - Incoming messages are queued. When `is_idle()` returns True and the queue is non-empty, the next message is passed to `deliver()`.
-- The socket path is `~/.claudio/<name>.sock` by default. Override with `state_dir`.
+- Pairing lets agents address each other by name. A `pair_request` holds the connection open until the remote agent calls `pair_approve`; both sides then record each other in a local peers file.
 
 ## Used by
 
