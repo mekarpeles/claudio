@@ -317,12 +317,12 @@ _SUBCOMMANDS = {'discover', 'pair', 'peers', 'send'}
 
 def main() -> None:
     args = sys.argv[1:]
-    if not args or args[0] in ('-h', '--help'):
+    if args and args[0] in ('-h', '--help'):
         print(USAGE)
         sys.exit(0)
 
-    cmd = args[0]
-    rest = args[1:]
+    cmd = args[0] if args else None
+    rest = args[1:] if args else []
 
     # 'start' kept as a silent alias
     if cmd in ('start',) or cmd not in _SUBCOMMANDS:
