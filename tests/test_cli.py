@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 import claudio
@@ -199,6 +200,66 @@ class TestPeersList(unittest.TestCase):
         self.assertIn('bob', output)
         self.assertIn('/tmp/alice.sock', output)
         self.assertIn('/tmp/bob.sock', output)
+
+
+class TestClaudeArgvBuilder(unittest.TestCase):
+    """_claude_argv builds the exec argv for claude — plain, or resuming a
+    given session id (used to promote an existing Claude session)."""
+
+    def test_plain_start_has_no_resume_flag(self):
+        from claudio.cli import _claude_argv
+        self.assertEqual(_claude_argv('claude'), ['claude'])
+
+    def test_resume_id_none_is_plain(self):
+        from claudio.cli import _claude_argv
+        self.assertEqual(_claude_argv('claude', None), ['claude'])
+
+    def test_resume_id_appends_resume_flag(self):
+        from claudio.cli import _claude_argv
+        self.assertEqual(_claude_argv('claude', 'abc-123'), ['claude', '--resume', 'abc-123'])
+
+
+class TestPromoteSessionFlagParsing(unittest.TestCase):
+    """`claudio -f <claude-session-id>` (or `--from`) promotes an existing
+    Claude session into a claudio-managed one by resuming it."""
+
+    def test_dash_f_flag_parsed_with_no_name(self):
+        import claudio.cli as cli
+        with patch.object(cli, 'cmd_start', return_value=0) as mock_start, \
+             patch.object(sys, 'argv', ['claudio', '-f', 'abc-123']):
+            with self.assertRaises(SystemExit):
+                cli.main()
+        mock_start.assert_called_once()
+        args, kwargs = mock_start.call_args
+        self.assertEqual(kwargs.get('resume_id'), 'abc-123')
+
+    def test_dash_f_flag_parsed_with_agent_name(self):
+        import claudio.cli as cli
+        with patch.object(cli, 'cmd_start', return_value=0) as mock_start, \
+             patch.object(sys, 'argv', ['claudio', '-f', 'abc-123', 'alice']):
+            with self.assertRaises(SystemExit):
+                cli.main()
+        args, kwargs = mock_start.call_args
+        self.assertEqual(args[0], ['alice'])
+        self.assertEqual(kwargs.get('resume_id'), 'abc-123')
+
+    def test_long_form_dash_dash_from(self):
+        import claudio.cli as cli
+        with patch.object(cli, 'cmd_start', return_value=0) as mock_start, \
+             patch.object(sys, 'argv', ['claudio', '--from', 'abc-123']):
+            with self.assertRaises(SystemExit):
+                cli.main()
+        _, kwargs = mock_start.call_args
+        self.assertEqual(kwargs.get('resume_id'), 'abc-123')
+
+    def test_no_dash_f_leaves_resume_id_none(self):
+        import claudio.cli as cli
+        with patch.object(cli, 'cmd_start', return_value=0) as mock_start, \
+             patch.object(sys, 'argv', ['claudio', 'alice']):
+            with self.assertRaises(SystemExit):
+                cli.main()
+        _, kwargs = mock_start.call_args
+        self.assertIsNone(kwargs.get('resume_id'))
 
 
 if __name__ == '__main__':

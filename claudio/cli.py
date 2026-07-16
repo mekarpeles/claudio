@@ -50,7 +50,17 @@ def _resolve_target(target: str, state_dir: str, agent_name: Optional[str]) -> O
     return os.path.join(state_dir, f'{target}.sock')
 
 
-def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+def _claude_argv(claude_bin: str, resume_id: Optional[str] = None) -> list:
+    """Build the argv used to exec claude — plain, or resuming a given session
+    id so an existing (externally-created) Claude session can be promoted into
+    a claudio-managed one."""
+    if resume_id:
+        return [claude_bin, '--resume', resume_id]
+    return [claude_bin]
+
+
+def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None,
+              resume_id: Optional[str] = None) -> int:
     """claudio [<name>] — start an ephemeral Claude Code session with a messaging daemon."""
     import fcntl as _fcntl
     import pty as _pty
@@ -83,9 +93,11 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
 
     name = _start(name=agent_name, deliver=deliver, is_idle=lambda: True, state_dir=state_dir)
     sock = socket_path(name, state_dir)
-    print(f"claudio: session '{name}' at {sock}")
+    resumed_note = f' (resuming {resume_id})' if resume_id else ''
+    print(f"claudio: session '{name}' at {sock}{resumed_note}")
 
     claude_bin = os.environ.get('CLAUDIO_CLAUDE_CMD', 'claude')
+    claude_argv = _claude_argv(claude_bin, resume_id)
     env = os.environ.copy()
     env['CLAUDIO_AGENT_NAME'] = name
     env['CLAUDIO_STATE_DIR'] = state_dir
@@ -99,7 +111,7 @@ def cmd_start(args: list, state_dir: Optional[str] = None, agent_name: Optional[
     if pid == 0:
         # Child: exec claude.  pty.fork already set up the controlling terminal.
         try:
-            os.execvpe(claude_bin, [claude_bin], env)
+            os.execvpe(claude_bin, claude_argv, env)
         except Exception:
             pass
         os._exit(1)
@@ -397,6 +409,10 @@ claudio — peer-to-peer messaging for Claude Code agents
 
 Usage:
   claudio [<name>]                   Start a daemon (auto-names 0, 1, 2... if omitted)
+  claudio -f <claude-session-id> [<name>]
+                                      Promote an existing Claude session into a claudio
+                                      agent (resumes that session id; run from the same
+                                      cwd it was started in — same as any --resume)
   claudio ls                         List all running claudio agents
   claudio pair <name|socket>         Pair with the agent named <name> or at <socket> (blocks until approved)
   claudio pair --approve <name>      Approve a pending pair request from <name>
@@ -426,6 +442,13 @@ def main() -> None:
         print(USAGE)
         sys.exit(0)
 
+    # -f/--from <claude-session-id> promotes an existing Claude session into
+    # this claudio agent by resuming it instead of starting fresh.
+    resume_id = None
+    if len(args) >= 2 and args[0] in ('-f', '--from'):
+        resume_id = args[1]
+        args = args[2:]
+
     cmd = args[0] if args else None
     rest = args[1:] if args else []
 
@@ -433,7 +456,7 @@ def main() -> None:
     if cmd in ('start',) or cmd not in _SUBCOMMANDS:
         # treat cmd as optional name: `claudio [name]` or `claudio start [name]`
         name_args = rest if cmd == 'start' else args
-        sys.exit(cmd_start(name_args))
+        sys.exit(cmd_start(name_args, resume_id=resume_id))
     elif cmd in ('ls', 'discover'):  # discover kept as alias
         sys.exit(cmd_discover(rest))
     elif cmd == 'pair':
