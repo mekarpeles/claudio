@@ -15,6 +15,12 @@ from typing import Callable, Optional
 
 POLL_INTERVAL = 0.5  # seconds between idle checks
 _RECV_BUF = 65536
+# How long a session must be *continuously* idle before a registered nudge
+# fires.  15 minutes: long enough never to trigger during normal work (a
+# session routinely sits idle a minute or two between turns while a human
+# reads output), short enough to still land inside a working session.  Inert
+# for every existing caller regardless, since the default nudge list is empty.
+DEFAULT_NUDGE_AFTER = 900.0
 # Default to /tmp/claudio — ephemeral, no cleanup needed, no project dir pollution.
 # cmux agents override this by setting CLAUDIO_STATE_DIR to their homedir.
 DEFAULT_STATE_DIR = os.path.join(os.path.abspath(os.sep), 'tmp', 'claudio')
@@ -65,15 +71,20 @@ def start(
     deliver: Callable[[dict], None] = lambda msg: None,
     is_idle: Callable[[], bool] = lambda: True,
     state_dir: str = DEFAULT_STATE_DIR,
+    nudge_after: Optional[float] = DEFAULT_NUDGE_AFTER,
 ) -> str:
     """
     Start a claudio agent in background threads. Non-blocking. Returns the session name.
 
-    name      — session handle; auto-assigned (0, 1, 2...) if omitted
-    deliver   — called with a message dict when the session is ready
-    is_idle   — returns True when the session can accept a message
-    state_dir — directory for the Unix socket
+    name        — session handle; auto-assigned (0, 1, 2...) if omitted
+    deliver     — called with a message dict when the session is ready
+    is_idle     — returns True when the session can accept a message
+    state_dir   — directory for the Unix socket
+    nudge_after — seconds of continuous idleness before a registered nudge
+                  fires; None mutes nudging without unregistering anything.
+                  No effect unless prompts are registered (default: none).
     """
+    from .nudges import Nudges, next_prompt, nudge_message, nudges_path, should_fire
     from .peers import Peers, peers_path
 
     os.makedirs(state_dir, exist_ok=True)
@@ -90,6 +101,24 @@ def start(
     lock = threading.Lock()
     pending_pairs: dict = {}
     peers = Peers(peers_path(name, state_dir))
+    nudges = Nudges(nudges_path(name, state_dir))
+
+    # Monotonic timestamp of when the session last became continuously idle,
+    # or None whenever it is not idle.  Shared with the socket threads, so it
+    # lives under the same `lock` that guards `queue` — no second lock.
+    idle_since: Optional[float] = None
+
+    def _reset_idle_clock() -> None:
+        """Restart the idle clock. Caller must hold `lock`.
+
+        Called wherever something happens that makes the session non-idle or
+        gives it work: is_idle() observed False, a real message enqueued, a
+        real message delivered, or a nudge fired.  A nudge is for genuinely
+        prolonged idleness, so any of those has to make the threshold elapse
+        again from scratch.
+        """
+        nonlocal idle_since
+        idle_since = None
 
     def _handle_pair_request(conn: socket.socket, msg: dict) -> None:
         remote_name = msg.get('name', '')
@@ -112,6 +141,7 @@ def start(
                     f'Run: claudio pair --approve {remote_name}'
                 )
             })
+            _reset_idle_clock()
         # conn stays open until approved/rejected/timed-out
 
     def _handle_pair_approve(conn: socket.socket, msg: dict) -> None:
@@ -138,6 +168,7 @@ def start(
         # Regular message: enqueue, ack, close
         with lock:
             queue.append(msg)
+            _reset_idle_clock()
         conn.sendall(json.dumps({'ok': True}).encode())
         conn.close()
 
@@ -202,19 +233,80 @@ def start(
                     pass
 
     def delivery_loop() -> None:
+        nonlocal idle_since
+        last_nudge: Optional[str] = None  # delivery-loop-local; needs no lock
+        nudge_cache: tuple = (None, [])   # (stat key, prompts)
+
+        def current_nudges() -> list:
+            """Registered prompts, re-read only when the file actually changes.
+
+            One stat() per tick, and a JSON parse only when another process
+            (`claudio nudge add`) has touched the file — so registrations are
+            picked up live without a restart, and without re-reading on every
+            tick forever.
+            """
+            nonlocal nudge_cache
+            try:
+                st = os.stat(nudges.path)
+            except OSError:
+                return []
+            key = (st.st_mtime_ns, st.st_size)
+            if nudge_cache[0] != key:
+                nudge_cache = (key, nudges.load())
+            return nudge_cache[1]
+
         while True:
             time.sleep(POLL_INTERVAL)
+
             with lock:
-                if not queue:
-                    continue
-            if not is_idle():
+                queued = bool(queue)
+
+            # Cheap per-tick gate: a stat(), and no is_idle() call. With no
+            # nudges registered — the default — the loop must behave exactly as
+            # it did before nudges existed, and that includes *not* polling
+            # is_idle() on empty-queue ticks: cmux's is_idle() shells out to
+            # tmux twice per call, so polling it 2x/sec for every idle agent
+            # would be a real regression.
+            nudging = nudge_after is not None and bool(current_nudges())
+            if not queued and not nudging:
                 continue
+
+            idle = is_idle()
+            now = time.monotonic()  # monotonic: a duration threshold must not
+                                    # be perturbed by wall-clock/NTP steps
             with lock:
-                try:
-                    msg = queue.popleft()
-                except IndexError:
-                    continue
-            deliver(msg)
+                if not idle:
+                    _reset_idle_clock()
+                elif idle_since is None:
+                    idle_since = now
+                due = should_fire(idle_since, now, nudge_after)
+
+            if not idle:
+                continue
+
+            # Real messages keep strict priority; nudges are only considered
+            # once the real inbox is empty.
+            if queued:
+                with lock:
+                    try:
+                        msg = queue.popleft()
+                    except IndexError:
+                        continue
+                    _reset_idle_clock()
+                deliver(msg)
+                time.sleep(1.0)
+                continue
+
+            if not due:
+                continue
+
+            prompt = next_prompt(current_nudges(), last_nudge)
+            if prompt is None:
+                continue
+            last_nudge = prompt
+            with lock:
+                _reset_idle_clock()
+            deliver(nudge_message(prompt))
             time.sleep(1.0)
 
     threading.Thread(target=serve, daemon=True).start()
@@ -228,16 +320,21 @@ def run(
     deliver: Callable[[dict], None] = lambda msg: None,
     is_idle: Callable[[], bool] = lambda: True,
     state_dir: str = DEFAULT_STATE_DIR,
+    nudge_after: Optional[float] = DEFAULT_NUDGE_AFTER,
 ) -> None:
     """
     Start a claudio agent and block until interrupted.
 
-    name      — session handle; auto-assigned (0, 1, 2...) if omitted
-    deliver   — called with a message dict when the session is ready
-    is_idle   — returns True when the session can accept a message
-    state_dir — directory for the Unix socket
+    name        — session handle; auto-assigned (0, 1, 2...) if omitted
+    deliver     — called with a message dict when the session is ready
+    is_idle     — returns True when the session can accept a message
+    state_dir   — directory for the Unix socket
+    nudge_after — seconds of continuous idleness before a registered nudge
+                  fires; None mutes nudging without unregistering anything.
+                  No effect unless prompts are registered (default: none).
     """
-    start(name=name, deliver=deliver, is_idle=is_idle, state_dir=state_dir)
+    start(name=name, deliver=deliver, is_idle=is_idle, state_dir=state_dir,
+          nudge_after=nudge_after)
     # Block the calling thread forever (daemon threads keep running)
     while True:
         time.sleep(3600)

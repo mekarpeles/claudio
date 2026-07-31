@@ -8,6 +8,9 @@ Commands:
     claudio pair --approve <name>      Approve a pending pair request from <name>
     claudio peers                      List current peers
     claudio send <name|socket> <msg>   Send a message to a peer
+    claudio nudge [list]               List registered idle-nudge prompts
+    claudio nudge add <prompt>         Register an idle-nudge prompt
+    claudio nudge remove <text|index>  Unregister an idle-nudge prompt
 """
 
 import os
@@ -16,6 +19,7 @@ import time
 from typing import Optional
 
 from .agent import DEFAULT_STATE_DIR, _RECV_BUF, _next_session_name, send_to, socket_path, start as _start
+from .nudges import Nudges, nudges_path
 from .peers import Peers, peers_path
 
 
@@ -404,6 +408,88 @@ def cmd_send(args: list, state_dir: Optional[str] = None, agent_name: Optional[s
         return 1
 
 
+NUDGE_USAGE = """\
+usage: claudio nudge [list]               list registered nudge prompts
+       claudio nudge add <prompt>         register a prompt
+       claudio nudge remove <text|index>  unregister a prompt\
+"""
+
+
+def cmd_nudge_list(args: list, state_dir: str, agent_name: str) -> int:
+    """claudio nudge [list] — list registered nudge prompts, with indices."""
+    prompts = Nudges(nudges_path(agent_name, state_dir)).all()
+    if not prompts:
+        print("(no nudges)")
+        return 0
+    width = len(str(len(prompts) - 1))
+    for i, prompt in enumerate(prompts):
+        print(f"{i:>{width}}   {prompt}")
+    return 0
+
+
+def cmd_nudge_add(args: list, state_dir: str, agent_name: str) -> int:
+    """claudio nudge add <prompt> — register a prompt; idempotent."""
+    if not args:
+        print(NUDGE_USAGE, file=sys.stderr)
+        return 1
+
+    # Join so `claudio nudge add eat something` works without shell quoting.
+    prompt = ' '.join(args).strip()
+    nudges = Nudges(nudges_path(agent_name, state_dir))
+    if nudges.add(prompt):
+        print(f"claudio: registered nudge: {prompt}")
+        return 0
+    if not prompt:
+        print("claudio: nudge prompt cannot be empty", file=sys.stderr)
+        return 1
+    # Already present — a no-op success, since the prompt is registered as asked.
+    print(f"claudio: nudge already registered: {prompt}")
+    return 0
+
+
+def cmd_nudge_remove(args: list, state_dir: str, agent_name: str) -> int:
+    """claudio nudge remove <text|index> — unregister a prompt."""
+    if not args:
+        print(NUDGE_USAGE, file=sys.stderr)
+        return 1
+
+    target = ' '.join(args).strip()
+    removed = Nudges(nudges_path(agent_name, state_dir)).remove_target(target)
+    if removed is None:
+        print(f"claudio: no nudge matching '{target}' — run 'claudio nudge list'", file=sys.stderr)
+        return 1
+    print(f"claudio: unregistered nudge: {removed}")
+    return 0
+
+
+def cmd_nudge(args: list, state_dir: Optional[str] = None, agent_name: Optional[str] = None) -> int:
+    """
+    claudio nudge [list]               — list registered nudge prompts
+    claudio nudge add <prompt>         — register a prompt
+    claudio nudge remove <text|index>  — unregister a prompt
+
+    Thin dispatcher, mirroring cmd_pair.
+    """
+    state_dir = state_dir or _state_dir()
+    agent_name = agent_name or _agent_name()
+
+    if not agent_name:
+        print("claudio: CLAUDIO_AGENT_NAME or CMUX_SESSION_NAME must be set", file=sys.stderr)
+        return 1
+
+    sub = args[0] if args else 'list'
+    rest = args[1:]
+
+    if sub == 'list':
+        return cmd_nudge_list(rest, state_dir, agent_name)
+    elif sub == 'add':
+        return cmd_nudge_add(rest, state_dir, agent_name)
+    elif sub in ('remove', 'rm'):
+        return cmd_nudge_remove(rest, state_dir, agent_name)
+    print(NUDGE_USAGE, file=sys.stderr)
+    return 1
+
+
 USAGE = """\
 claudio — peer-to-peer messaging for Claude Code agents
 
@@ -418,6 +504,9 @@ Usage:
   claudio pair --approve <name>      Approve a pending pair request from <name>
   claudio peers                      List current peers
   claudio send <name|socket> <msg>   Send a message to a peer
+  claudio nudge [list]               List this agent's idle-nudge prompts
+  claudio nudge add <prompt>         Register a prompt to fire on prolonged idle
+  claudio nudge remove <text|index>  Unregister a prompt
 
 Environment:
   CLAUDIO_AGENT_NAME   Override this agent's name
@@ -433,7 +522,7 @@ Quick start (two terminals):
 """
 
 
-_SUBCOMMANDS = {'ls', 'discover', 'pair', 'peers', 'send'}
+_SUBCOMMANDS = {'ls', 'discover', 'pair', 'peers', 'send', 'nudge'}
 
 
 def main() -> None:
@@ -465,3 +554,5 @@ def main() -> None:
         sys.exit(cmd_peers(rest))
     elif cmd == 'send':
         sys.exit(cmd_send(rest))
+    elif cmd == 'nudge':
+        sys.exit(cmd_nudge(rest))
