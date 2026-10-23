@@ -115,9 +115,23 @@ def cmd_aliases(args):
     return 0
 
 
+def _sender(explicit):
+    """Resolve 'from': --from, else $CLAUDIO_AGENT_NAME, else OS login name.
+    Avoids opaque defaults (a raw sessionId) that confuse the receiver.
+    """
+    import getpass
+    if explicit:
+        return explicit
+    if os.environ.get("CLAUDIO_AGENT_NAME"):
+        return os.environ["CLAUDIO_AGENT_NAME"]
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "claudio"
+
+
 def cmd_send(args):
-    sender = (args.sender or os.environ.get("CLAUDIO_AGENT_NAME")
-              or os.environ.get("CLAUDE_CODE_SESSION_ID", "claudio"))
+    sender = _sender(args.sender)
     message = " ".join(args.message)
     entry = registry.get(args.selector)
     try:
