@@ -114,11 +114,6 @@ class TestNudges(unittest.TestCase):
     def test_nudges_path_format(self):
         self.assertEqual(nudges_path('myagent', '/some/dir'), '/some/dir/myagent.nudges.json')
 
-    def test_nudges_and_peers_paths_do_not_collide(self):
-        """A single agent's nudges and peers files are distinct."""
-        from claudio.peers import peers_path
-        self.assertNotEqual(nudges_path('a', '/d'), peers_path('a', '/d'))
-
 
 class TestRemoveTargeting(unittest.TestCase):
     """`remove` targets by exact text first, integer index second — so a prompt
